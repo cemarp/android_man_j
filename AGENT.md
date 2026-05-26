@@ -8,10 +8,11 @@ The app should support:
 - Multi-room stitching (continuous scan + joining separate scans).
 - Automatic and manual feature tagging/sizing.
 - Manual J data override for aspects like insulation, roofing, etc.
+- Wall scanning capability (crucial for accurate Manual J load calculations).
 
 ## Technical Approach
 - Native Android app using Kotlin and Jetpack Compose.
-- ARCore for on-device room scanning and tracking.
+- ARCore for on-device room scanning and tracking (horizontal and vertical planes).
 - Modular architecture to support both real-time scanning and Polycam import workflows.
 
 ## Known Issues / Next Steps
@@ -19,6 +20,6 @@ The app should support:
 
 ## Context / Decisions
 - Built from scratch targeting modern Android devices (Pixel 7 onwards).
-- Updated to target Android 15 (API 35) and added support for 16 KB memory page sizes to ensure compatibility with Pixel 7+ devices. This included upgrading ARCore to 1.54.0 and enabling `pageSizeCompat` in the manifest.
 - Emphasizing AR scanning first, followed by manual J logic.
 - Relying on local on-device capabilities for AR scanning and allowing user overrides for automatic feature tagging.
+- Using `android:extractNativeLibs="true"` to bypass 16kb page size compatibility issues for legacy native libraries like Filament and ARCore.

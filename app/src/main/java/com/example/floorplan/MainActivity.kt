@@ -50,6 +50,10 @@ fun MainScreen() {
         if (cameraPermissionState.status.isGranted) {
             ARScannerScreen(
                 onClose = { isARMode = false },
+                onFinishScan = {
+                    isARMode = false
+                    showFloorPlan = true
+                },
                 onAnchorPlaced = { point ->
                     anchorPoints.add(point)
                 }
@@ -101,7 +105,7 @@ fun MainScreen() {
 }
 
 @Composable
-fun ARScannerScreen(onClose: () -> Unit, onAnchorPlaced: (Point2D) -> Unit) {
+fun ARScannerScreen(onClose: () -> Unit, onFinishScan: () -> Unit, onAnchorPlaced: (Point2D) -> Unit) {
     val childNodes = remember { mutableStateListOf<Node>() }
     var anchorsCount by remember { mutableStateOf(0) }
     var currentHitPoint by remember { mutableStateOf<Point2D?>(null) }
@@ -137,12 +141,19 @@ fun ARScannerScreen(onClose: () -> Unit, onAnchorPlaced: (Point2D) -> Unit) {
             }
         )
 
-        // Custom crosshair / add button overlay
+        // Custom crosshair / Instructions overlay
         Box(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
         ) {
-            Text("+", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.primary)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = "Scan vertical walls and floors.\nAim at corners to place anchors.",
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(bottom = 64.dp)
+                )
+                Text("+", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.primary)
+            }
         }
 
         Button(
@@ -159,13 +170,20 @@ fun ARScannerScreen(onClose: () -> Unit, onAnchorPlaced: (Point2D) -> Unit) {
             Text("Add Anchor")
         }
 
-        Button(
-            onClick = onClose,
+        Row(
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .padding(16.dp)
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text("Close Scan")
+            Button(onClick = onClose) {
+                Text("Cancel")
+            }
+            if (anchorsCount >= 2) {
+                Button(onClick = onFinishScan) {
+                    Text("Finish Scan")
+                }
+            }
         }
 
         Text(
