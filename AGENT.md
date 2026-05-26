@@ -16,7 +16,28 @@ The app should support:
 - Modular architecture to support both real-time scanning and Polycam import workflows.
 
 ## Known Issues / Next Steps
-- Currently initializing the project and building the basic AR room scanning MVP.
+- Currently refining the AR room scanning MVP. Wall boundaries are captured using a 3D coordinate system and flattened to 2D for drawing the floorplan, which helps merge vertical taps.
+
+## Debugging Guide for Agents (Device Debugging)
+If you need to debug AR functionality or crashes while the user is running the app on a physical device connected via Android Studio (or USB debugging), instruct the user to run the following `adb` commands to extract logs. You can then use this data to troubleshoot:
+
+1.  **Capture Custom AR Instrumentation Logs:**
+    The app uses the `ARDebug` tag to broadcast real-time hit-test statuses, plane tracking counts, and coordinate data.
+    `adb logcat -d -s ARDebug > ar_debug_log.txt`
+
+2.  **Capture Crash/Fatal Logs:**
+    To get stacktraces of any crashes:
+    `adb logcat -d AndroidRuntime:E *:S > crash_log.txt`
+
+3.  **Capture Screenshots (if visual bugs occur):**
+    `adb shell screencap -p /sdcard/screen.png`
+    `adb pull /sdcard/screen.png .`
+
+4.  **Capture Screen Recordings (for AR tracking analysis):**
+    `adb shell screenrecord --time-limit 10 /sdcard/ar_record.mp4`
+    `adb pull /sdcard/ar_record.mp4 .`
+
+When switching agents, you should read these outputs (if provided by the user) to understand exactly why a raycast failed (e.g. `Hit discarded: Trackable is not a Plane`) or why a tracking state degraded.
 
 ## Context / Decisions
 - Built from scratch targeting modern Android devices (Pixel 7 onwards).
