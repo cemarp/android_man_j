@@ -25,6 +25,28 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
 import android.util.Log
+import android.graphics.Bitmap
+import android.view.PixelCopy
+import android.view.SurfaceView
+import android.os.Handler
+import android.os.Looper
+
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.foundation.Image
+
+// Data models for the different scan types
+sealed class RoomScanData {
+    data class FloorPerimeter(
+        val floorPoints: List<Point3D>,
+        var ceilingHeightMeters: Float? = null
+    ) : RoomScanData()
+
+    data class WallPolygons(
+        val walls: List<List<Point3D>>
+    ) : RoomScanData()
+}
+
+data class CapturedFeature(val pose: Point3D, val image: Bitmap, val label: String)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -47,19 +69,19 @@ class MainActivity : ComponentActivity() {
 fun MainScreen() {
     var isARMode by remember { mutableStateOf(false) }
     var showFloorPlan by remember { mutableStateOf(false) }
-    val anchorPoints = remember { mutableStateListOf<Point3D>() }
+
+    // Store our consolidated scan data instead of just a raw list of points
+    var roomScanData by remember { mutableStateOf<RoomScanData?>(null) }
     val cameraPermissionState = rememberPermissionState(Manifest.permission.CAMERA)
 
     if (isARMode) {
         if (cameraPermissionState.status.isGranted) {
             ARScannerScreen(
                 onClose = { isARMode = false },
-                onFinishScan = {
+                onFinishScan = { scanData ->
+                    roomScanData = scanData
                     isARMode = false
                     showFloorPlan = true
-                },
-                onAnchorPlaced = { point ->
-                    anchorPoints.add(point)
                 }
             )
         } else {
@@ -81,7 +103,24 @@ fun MainScreen() {
             ) {
                 Text("Back to Menu")
             }
-            FloorPlanCanvas(points = anchorPoints, modifier = Modifier.weight(1f))
+
+            // Only draw the canvas if we have floor perimeter data
+            val currentScan = roomScanData
+            if (currentScan is RoomScanData.FloorPerimeter) {
+                FloorPlanCanvas(points = currentScan.floorPoints, modifier = Modifier.weight(1f))
+                currentScan.ceilingHeightMeters?.let { h ->
+                    Text(
+                        text = "Estimated Ceiling Height: %.1f ft".format(h * 3.28084),
+                        modifier = Modifier.padding(16.dp)
+                    )
+                }
+            } else if (currentScan is RoomScanData.WallPolygons) {
+                FloorPlanCanvas(points = emptyList(), walls = currentScan.walls, modifier = Modifier.weight(1f))
+                Text(
+                    text = "3D Wall Polygons Captured: ${currentScan.walls.size} walls.",
+                    modifier = Modifier.padding(16.dp)
+                )
+            }
         }
     } else {
         Column(
@@ -97,23 +136,48 @@ fun MainScreen() {
                 Text("Import Polycam Scan")
             }
             Spacer(modifier = Modifier.height(16.dp))
-            Button(onClick = { showFloorPlan = true }) {
-                Text("View 2D Floor Plan (${anchorPoints.size} points)")
+            Button(onClick = { showFloorPlan = true }, enabled = roomScanData != null) {
+                Text("View Captured Room Data")
             }
             Spacer(modifier = Modifier.height(16.dp))
-            Button(onClick = { anchorPoints.clear() }) {
+            Button(onClick = { roomScanData = null }) {
                 Text("Clear Data")
             }
         }
     }
 }
 
+enum class ScanMode(val title: String) {
+    FLOOR_PERIMETER("Floor Perimeter (w/ Default Height)"),
+    CEILING_TAP("Ceiling Tap (Height)"),
+    TRACE_3D_WALLS("Trace 3D Walls")
+}
+
 @Composable
-fun ARScannerScreen(onClose: () -> Unit, onFinishScan: () -> Unit, onAnchorPlaced: (Point3D) -> Unit) {
+fun ARScannerScreen(onClose: () -> Unit, onFinishScan: (RoomScanData) -> Unit) {
     val childNodes = remember { mutableStateListOf<Node>() }
-    var anchorsCount by remember { mutableStateOf(0) }
     var currentHitPoint by remember { mutableStateOf<Point3D?>(null) }
     var screenSize by remember { mutableStateOf(IntSize.Zero) }
+
+    var currentScanMode by remember { mutableStateOf(ScanMode.FLOOR_PERIMETER) }
+    var scanModeDropdownExpanded by remember { mutableStateOf(false) }
+
+    // State for capturing
+    val capturedFloorPoints = remember { mutableStateListOf<Point3D>() }
+    var ceilingAnchor by remember { mutableStateOf<Point3D?>(null) }
+    val captured3DWalls = remember { mutableStateListOf<List<Point3D>>() }
+    val currentTracingWall = remember { mutableStateListOf<Point3D>() }
+
+    // Feature capture state
+    var pendingFeatureImage by remember { mutableStateOf<Bitmap?>(null) }
+    var pendingFeaturePose by remember { mutableStateOf<Point3D?>(null) }
+    val capturedFeatures = remember { mutableStateListOf<CapturedFeature>() }
+
+    // State for manual ceiling height input
+    var showManualHeightDialog by remember { mutableStateOf(false) }
+    var manualHeightInput by remember { mutableStateOf("") }
+
+    val totalAnchorsPlaced = capturedFloorPoints.size + (if (ceilingAnchor != null) 1 else 0) + (captured3DWalls.sumOf { it.size } + currentTracingWall.size)
 
     // Debug instrumentation states
     var debugTrackingState by remember { mutableStateOf("UNKNOWN") }
@@ -125,6 +189,8 @@ fun ARScannerScreen(onClose: () -> Unit, onFinishScan: () -> Unit, onAnchorPlace
             .fillMaxSize()
             .onSizeChanged { screenSize = it }
     ) {
+        var arSurfaceView: SurfaceView? by remember { mutableStateOf(null) }
+
         ARScene(
             modifier = Modifier.fillMaxSize(),
             childNodes = childNodes,
@@ -133,6 +199,12 @@ fun ARScannerScreen(onClose: () -> Unit, onFinishScan: () -> Unit, onAnchorPlace
                 // Re-enable HORIZONTAL_AND_VERTICAL since hitting the bottom corner often intersects the floor plane.
                 config.planeFindingMode = Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL
                 config.focusMode = Config.FocusMode.AUTO
+            },
+            onViewCreated = {
+                // `this` is ARSceneView context
+                if (this is SurfaceView) {
+                    arSurfaceView = this
+                }
             },
             onSessionUpdated = { session, frame ->
                 val camera = frame.camera
@@ -181,6 +253,31 @@ fun ARScannerScreen(onClose: () -> Unit, onFinishScan: () -> Unit, onAnchorPlace
             }
         )
 
+        // Top Right: Scanning Options Dropdown
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(16.dp)
+        ) {
+            Button(onClick = { scanModeDropdownExpanded = true }) {
+                Text("Mode: ${currentScanMode.title}")
+            }
+            DropdownMenu(
+                expanded = scanModeDropdownExpanded,
+                onDismissRequest = { scanModeDropdownExpanded = false }
+            ) {
+                ScanMode.values().forEach { mode ->
+                    DropdownMenuItem(
+                        text = { Text(mode.title) },
+                        onClick = {
+                            currentScanMode = mode
+                            scanModeDropdownExpanded = false
+                        }
+                    )
+                }
+            }
+        }
+
         // Custom crosshair / Instructions overlay
         Box(
             modifier = Modifier.fillMaxSize()
@@ -203,7 +300,11 @@ fun ARScannerScreen(onClose: () -> Unit, onFinishScan: () -> Unit, onAnchorPlace
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "1. Point camera at walls.\n2. Aim the '+' exactly at the BOTTOM corners where the wall meets the floor.\n3. Tap 'Add Anchor' sequentially around the room.",
+                        text = when (currentScanMode) {
+                            ScanMode.FLOOR_PERIMETER -> "1. Point camera at walls.\n2. Aim '+' at the BOTTOM corners.\n3. Tap 'Add Anchor' sequentially."
+                            ScanMode.CEILING_TAP -> "1. Point camera at the ceiling.\n2. Aim '+' at a flat point.\n3. Tap to capture ceiling height."
+                            ScanMode.TRACE_3D_WALLS -> "1. Trace an individual wall.\n2. Tap all 4 corners (Bottom-Left, Bottom-Right, Top-Right, Top-Left)."
+                        },
                         color = MaterialTheme.colorScheme.onSurface
                     )
                 }
@@ -233,18 +334,61 @@ fun ARScannerScreen(onClose: () -> Unit, onFinishScan: () -> Unit, onAnchorPlace
             }
         }
 
-        Button(
-            onClick = {
-                currentHitPoint?.let { point ->
-                    onAnchorPlaced(point)
-                    anchorsCount++
-                }
-            },
+        Column(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(32.dp)
+                .padding(32.dp),
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text("Add Anchor")
+            Button(
+                onClick = {
+                    currentHitPoint?.let { point ->
+                        arSurfaceView?.let { surfaceView ->
+                            val bitmap = Bitmap.createBitmap(surfaceView.width, surfaceView.height, Bitmap.Config.ARGB_8888)
+                            PixelCopy.request(surfaceView, bitmap, { copyResult ->
+                                if (copyResult == PixelCopy.SUCCESS) {
+                                    pendingFeaturePose = point
+                                    pendingFeatureImage = bitmap
+                                } else {
+                                    Log.e("ARDebug", "Failed to capture pixel copy")
+                                }
+                            }, Handler(Looper.getMainLooper()))
+                        }
+                    }
+                }
+            ) {
+                Text("📸 Capture Window/Door")
+            }
+
+            Button(
+                onClick = {
+                    currentHitPoint?.let { point ->
+                        when (currentScanMode) {
+                            ScanMode.FLOOR_PERIMETER -> {
+                                capturedFloorPoints.add(point)
+                            }
+                            ScanMode.CEILING_TAP -> {
+                                ceilingAnchor = point
+                            }
+                            ScanMode.TRACE_3D_WALLS -> {
+                                currentTracingWall.add(point)
+                                if (currentTracingWall.size == 4) {
+                                    captured3DWalls.add(currentTracingWall.toList())
+                                    currentTracingWall.clear()
+                                }
+                            }
+                        }
+                    }
+                }
+            ) {
+                Text(
+                    text = when (currentScanMode) {
+                        ScanMode.CEILING_TAP -> if (ceilingAnchor == null) "Capture Ceiling Height" else "Retake Ceiling Height"
+                        else -> "Add Anchor"
+                    }
+                )
+            }
         }
 
         Row(
@@ -256,19 +400,117 @@ fun ARScannerScreen(onClose: () -> Unit, onFinishScan: () -> Unit, onAnchorPlace
             Button(onClick = onClose) {
                 Text("Cancel")
             }
-            if (anchorsCount >= 2) {
-                Button(onClick = onFinishScan) {
+
+            // Validation for finishing a scan based on the active mode
+            val canFinish = capturedFloorPoints.size >= 3 || captured3DWalls.isNotEmpty()
+
+            if (canFinish) {
+                Button(onClick = {
+                    if (captured3DWalls.isNotEmpty()) {
+                        onFinishScan(RoomScanData.WallPolygons(captured3DWalls.toList()))
+                    } else {
+                        // Floor perimeter mode logic
+                        if (ceilingAnchor != null && capturedFloorPoints.isNotEmpty()) {
+                            // Combine floor and ceiling taps
+                            val avgFloorY = capturedFloorPoints.map { it.y }.average().toFloat()
+                            val heightMeters = Math.abs((ceilingAnchor?.y ?: 0f) - avgFloorY)
+                            onFinishScan(RoomScanData.FloorPerimeter(capturedFloorPoints.toList(), ceilingHeightMeters = heightMeters))
+                        } else {
+                            // Ask for manual input
+                            showManualHeightDialog = true
+                        }
+                    }
+                }) {
                     Text("Finish Scan")
                 }
             }
         }
 
-        Text(
-            text = "Anchors placed: $anchorsCount",
-            color = MaterialTheme.colorScheme.onSurface,
+        Surface(
+            color = Color.White.copy(alpha = 0.7f),
+            shape = MaterialTheme.shapes.small,
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .padding(32.dp)
-        )
+        ) {
+            Text(
+                text = "Anchors placed: $totalAnchorsPlaced",
+                color = Color.Black,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+            )
+        }
+
+        // Render dialogs on top of ARScene to prevent unmounting and session resets
+        if (showManualHeightDialog) {
+            Box(modifier = Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+                Surface(shape = MaterialTheme.shapes.medium, color = Color.White) {
+                    Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("Enter Room Height (Feet)", style = MaterialTheme.typography.titleMedium)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        OutlinedTextField(
+                            value = manualHeightInput,
+                            onValueChange = { manualHeightInput = it },
+                            label = { Text("e.g. 8.5") }
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Row {
+                            Button(onClick = {
+                                showManualHeightDialog = false
+                            }) {
+                                Text("Cancel")
+                            }
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Button(onClick = {
+                                val heightFeet = manualHeightInput.toFloatOrNull() ?: 8.0f
+                                val heightMeters = heightFeet / 3.28084f
+                                val finalData = RoomScanData.FloorPerimeter(capturedFloorPoints.toList(), ceilingHeightMeters = heightMeters)
+                                onFinishScan(finalData)
+                                showManualHeightDialog = false
+                            }) {
+                                Text("Save & Finish")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (pendingFeatureImage != null && pendingFeaturePose != null) {
+            var labelText by remember { mutableStateOf("") }
+            Box(modifier = Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+                Surface(shape = MaterialTheme.shapes.medium, color = Color.White) {
+                    Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Image(
+                            bitmap = pendingFeatureImage!!.asImageBitmap(),
+                            contentDescription = "Captured Feature",
+                            modifier = Modifier.height(200.dp).fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        OutlinedTextField(
+                            value = labelText,
+                            onValueChange = { labelText = it },
+                            label = { Text("Label (e.g. Window, Door)") }
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Row {
+                            Button(onClick = {
+                                pendingFeatureImage = null
+                                pendingFeaturePose = null
+                            }) {
+                                Text("Cancel")
+                            }
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Button(onClick = {
+                                capturedFeatures.add(CapturedFeature(pendingFeaturePose!!, pendingFeatureImage!!, labelText))
+                                pendingFeatureImage = null
+                                pendingFeaturePose = null
+                            }) {
+                                Text("Save")
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

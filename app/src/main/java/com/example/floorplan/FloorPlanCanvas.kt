@@ -23,27 +23,30 @@ import kotlin.math.sqrt
 data class Point3D(val x: Float, val y: Float, val z: Float)
 
 @Composable
-fun FloorPlanCanvas(points: List<Point3D>, modifier: Modifier = Modifier) {
+fun FloorPlanCanvas(points: List<Point3D>, modifier: Modifier = Modifier, walls: List<List<Point3D>> = emptyList()) {
     Box(modifier = modifier.background(Color(0xFFE0E0E0))) {
+        // Collect all points to determine global canvas bounds
+        val allPoints = mutableListOf<Point3D>()
+        allPoints.addAll(points)
+        walls.forEach { allPoints.addAll(it) }
+
         // Filter points: merge points that are essentially the same XZ floor coordinate
-        // (e.g. if the user tapped top and bottom of the same corner)
-        val filteredPoints = mutableListOf<Point3D>()
+        val filteredFloorPoints = mutableListOf<Point3D>()
         for (point in points) {
-            if (filteredPoints.isEmpty()) {
-                filteredPoints.add(point)
+            if (filteredFloorPoints.isEmpty()) {
+                filteredFloorPoints.add(point)
             } else {
-                val lastPoint = filteredPoints.last()
+                val lastPoint = filteredFloorPoints.last()
                 val distXZ = sqrt(Math.pow((point.x - lastPoint.x).toDouble(), 2.0) + Math.pow((point.z - lastPoint.z).toDouble(), 2.0))
-                // If the next tapped point is less than 0.2 meters away horizontally, ignore it as a duplicate/vertical mistake
                 if (distXZ > 0.2) {
-                    filteredPoints.add(point)
+                    filteredFloorPoints.add(point)
                 }
             }
         }
 
         val textMeasurer = rememberTextMeasurer()
 
-        if (filteredPoints.isEmpty()) {
+        if (allPoints.isEmpty()) {
             Text(
                 text = "No valid anchors placed yet.",
                 modifier = Modifier.align(Alignment.Center),
@@ -55,10 +58,10 @@ fun FloorPlanCanvas(points: List<Point3D>, modifier: Modifier = Modifier) {
                 val canvasHeight = size.height
 
                 // Find min/max to normalize coordinates and fit them to the canvas
-                val minX = filteredPoints.minOfOrNull { it.x } ?: 0f
-                val maxX = filteredPoints.maxOfOrNull { it.x } ?: 0f
-                val minZ = filteredPoints.minOfOrNull { it.z } ?: 0f
-                val maxZ = filteredPoints.maxOfOrNull { it.z } ?: 0f
+                val minX = allPoints.minOfOrNull { it.x } ?: 0f
+                val maxX = allPoints.maxOfOrNull { it.x } ?: 0f
+                val minZ = allPoints.minOfOrNull { it.z } ?: 0f
+                val maxZ = allPoints.maxOfOrNull { it.z } ?: 0f
 
                 val rangeX = maxX - minX
                 val rangeZ = maxZ - minZ
@@ -71,70 +74,82 @@ fun FloorPlanCanvas(points: List<Point3D>, modifier: Modifier = Modifier) {
                 // Maintain aspect ratio
                 val scale = minOf(scaleX, scaleZ)
 
-                val path = Path()
-                filteredPoints.forEachIndexed { index, point ->
-                    val normalizedX = (point.x - minX) * scale + padding
-                    // Z goes negative in AR usually, but we normalize it so it handles any direction
-                    val normalizedZ = (point.z - minZ) * scale + padding
+                // 1. Draw 3D Walls
+                if (walls.isNotEmpty()) {
+                    walls.forEach { wall ->
+                        val path = Path()
+                        // Sort by X/Z roughly to form a 2D line segment representing the wall from top-down
+                        wall.forEachIndexed { index, point ->
+                            val normalizedX = (point.x - minX) * scale + padding
+                            val normalizedZ = (point.z - minZ) * scale + padding
 
-                    if (index == 0) {
-                        path.moveTo(normalizedX, normalizedZ)
-                    } else {
-                        path.lineTo(normalizedX, normalizedZ)
+                            if (index == 0) {
+                                path.moveTo(normalizedX, normalizedZ)
+                            } else {
+                                path.lineTo(normalizedX, normalizedZ)
+                            }
+
+                            drawCircle(color = Color.Magenta, radius = 8f, center = Offset(normalizedX, normalizedZ))
+                        }
+                        path.close()
+                        drawPath(path = path, color = Color.Magenta.copy(alpha = 0.5f), style = Stroke(width = 12f))
+                    }
+                }
+
+                // 2. Draw Floor Perimeter
+                if (filteredFloorPoints.isNotEmpty()) {
+                    val path = Path()
+                    filteredFloorPoints.forEachIndexed { index, point ->
+                        val normalizedX = (point.x - minX) * scale + padding
+                        val normalizedZ = (point.z - minZ) * scale + padding
+
+                        if (index == 0) {
+                            path.moveTo(normalizedX, normalizedZ)
+                        } else {
+                            path.lineTo(normalizedX, normalizedZ)
+                        }
+
+                        drawCircle(color = Color.Red, radius = 10f, center = Offset(normalizedX, normalizedZ))
                     }
 
-                    // Draw a circle for the anchor
-                    drawCircle(
-                        color = Color.Red,
-                        radius = 10f,
-                        center = Offset(normalizedX, normalizedZ)
-                    )
-                }
+                    if (filteredFloorPoints.size > 2) {
+                        path.close()
+                    }
 
-                // Close the path to form a room if there are more than 2 points
-                if (filteredPoints.size > 2) {
-                    path.close()
-                }
+                    drawPath(path = path, color = Color.Blue, style = Stroke(width = 8f))
 
-                drawPath(
-                    path = path,
-                    color = Color.Blue,
-                    style = Stroke(width = 8f)
-                )
+                    // Draw dimensions
+                    val numPoints = filteredFloorPoints.size
+                    if (numPoints > 1) {
+                        for (i in 0 until numPoints) {
+                            if (i == numPoints - 1 && numPoints <= 2) break
 
-                // Draw dimensions
-                val numPoints = filteredPoints.size
-                if (numPoints > 1) {
-                    for (i in 0 until numPoints) {
-                        // If it's the last point and we don't have enough to close, skip
-                        if (i == numPoints - 1 && numPoints <= 2) break
+                            val p1 = filteredFloorPoints[i]
+                            val p2 = filteredFloorPoints[(i + 1) % numPoints]
 
-                        val p1 = filteredPoints[i]
-                        val p2 = filteredPoints[(i + 1) % numPoints]
+                            val distMeters = sqrt(Math.pow((p2.x - p1.x).toDouble(), 2.0) + Math.pow((p2.z - p1.z).toDouble(), 2.0))
+                            val distFeet = distMeters * 3.28084
 
-                        // Distance in meters, converting to feet
-                        val distMeters = sqrt(Math.pow((p2.x - p1.x).toDouble(), 2.0) + Math.pow((p2.z - p1.z).toDouble(), 2.0))
-                        val distFeet = distMeters * 3.28084
+                            val text = String.format("%.1f ft", distFeet)
 
-                        val text = String.format("%.1f ft", distFeet)
+                            val normX1 = (p1.x - minX) * scale + padding
+                            val normZ1 = (p1.z - minZ) * scale + padding
+                            val normX2 = (p2.x - minX) * scale + padding
+                            val normZ2 = (p2.z - minZ) * scale + padding
 
-                        val normX1 = (p1.x - minX) * scale + padding
-                        val normZ1 = (p1.z - minZ) * scale + padding
-                        val normX2 = (p2.x - minX) * scale + padding
-                        val normZ2 = (p2.z - minZ) * scale + padding
+                            val midX = (normX1 + normX2) / 2
+                            val midZ = (normZ1 + normZ2) / 2
 
-                        val midX = (normX1 + normX2) / 2
-                        val midZ = (normZ1 + normZ2) / 2
+                            val textLayoutResult = textMeasurer.measure(
+                                text = text,
+                                style = TextStyle(fontSize = 14.sp, color = Color.Black, background = Color.White.copy(alpha = 0.7f))
+                            )
 
-                        val textLayoutResult = textMeasurer.measure(
-                            text = text,
-                            style = TextStyle(fontSize = 14.sp, color = Color.Black)
-                        )
-
-                        drawText(
-                            textLayoutResult = textLayoutResult,
-                            topLeft = Offset(midX - (textLayoutResult.size.width / 2), midZ - (textLayoutResult.size.height / 2))
-                        )
+                            drawText(
+                                textLayoutResult = textLayoutResult,
+                                topLeft = Offset(midX - (textLayoutResult.size.width / 2), midZ - (textLayoutResult.size.height / 2))
+                            )
+                        }
                     }
                 }
             }

@@ -14,6 +14,7 @@ The app should support:
 - Native Android app using Kotlin and Jetpack Compose.
 - ARCore for on-device room scanning and tracking (horizontal and vertical planes). *Experimental update: restricted strictly to vertical planes to improve wall-boundary targeting accuracy.*
 - Modular architecture to support both real-time scanning and Polycam import workflows.
+- Feature Capture Architecture: Windows and doors are captured by aiming the AR camera at the feature and saving the exact 3D camera pose (and an image frame). In a later step, the user draws a bounding box on the 2D image, which the app projects onto the 3D wall plane to calculate real-world dimensions for the Manual J workflow.
 
 ## Known Issues / Next Steps
 - Currently refining the AR room scanning MVP. Wall boundaries are captured using a 3D coordinate system and flattened to 2D for drawing the floorplan, which helps merge vertical taps.
