@@ -18,12 +18,24 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.sqrt
+import androidx.compose.runtime.*
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 
 // Represents a 3D coordinate for an AR anchor in world space
 data class Point3D(val x: Float, val y: Float, val z: Float)
 
 @Composable
 fun FloorPlanCanvas(points: List<Point3D>, modifier: Modifier = Modifier, walls: List<List<Point3D>> = emptyList(), features: List<CapturedFeature> = emptyList()) {
+    var scale by remember { mutableStateOf(1f) }
+    var offset by remember { mutableStateOf(Offset.Zero) }
+    var rotationZ by remember { mutableStateOf(0f) }
+    var rotationX by remember { mutableStateOf(0f) }
+    val density = LocalDensity.current.density
+
     Box(modifier = modifier.background(Color(0xFFE0E0E0))) {
         // Collect all points to determine global canvas bounds
         val allPoints = mutableListOf<Point3D>()
@@ -54,7 +66,67 @@ fun FloorPlanCanvas(points: List<Point3D>, modifier: Modifier = Modifier, walls:
                 color = Color.Gray
             )
         } else {
-            Canvas(modifier = Modifier.fillMaxSize()) {
+            // Legend Overlay
+            androidx.compose.material3.Surface(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(16.dp),
+                color = Color.White.copy(alpha = 0.8f),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+            ) {
+                androidx.compose.foundation.layout.Column(
+                    modifier = Modifier.padding(8.dp)
+                ) {
+                    androidx.compose.material3.Text("Legend", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = 14.sp)
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(4.dp))
+                    androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(modifier = Modifier.size(12.dp).background(Color.Blue))
+                        androidx.compose.foundation.layout.Spacer(modifier = Modifier.width(4.dp))
+                        androidx.compose.material3.Text("Floor Perimeter", fontSize = 12.sp)
+                    }
+                    androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(modifier = Modifier.size(12.dp).background(Color.Magenta.copy(alpha = 0.5f)))
+                        androidx.compose.foundation.layout.Spacer(modifier = Modifier.width(4.dp))
+                        androidx.compose.material3.Text("3D Walls", fontSize = 12.sp)
+                    }
+                    androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(modifier = Modifier.size(12.dp).background(Color.Red, shape = androidx.compose.foundation.shape.CircleShape))
+                        androidx.compose.foundation.layout.Spacer(modifier = Modifier.width(4.dp))
+                        androidx.compose.material3.Text("Anchors", fontSize = 12.sp)
+                    }
+                    androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(modifier = Modifier.size(12.dp).background(Color.Green))
+                        androidx.compose.foundation.layout.Spacer(modifier = Modifier.width(4.dp))
+                        androidx.compose.material3.Text("Features (Windows/Doors)", fontSize = 12.sp)
+                    }
+                }
+            }
+
+            Canvas(modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    detectTransformGestures { centroid, pan, zoom, rotation ->
+                        scale *= zoom
+                        // To trigger tilt, we look for 2-finger vertical drag (little zoom, little rotation, but high vertical pan relative to horizontal)
+                        if (zoom in 0.99f..1.01f && Math.abs(rotation) < 0.5f && Math.abs(pan.y) > Math.abs(pan.x) * 2f) {
+                            rotationX -= pan.y * 0.5f // Negative to tilt correctly
+                        } else {
+                            // Apply translation
+                            offset += pan
+                        }
+                        rotationZ += rotation
+                    }
+                }
+                .graphicsLayer(
+                    scaleX = scale,
+                    scaleY = scale,
+                    translationX = offset.x,
+                    translationY = offset.y,
+                    rotationZ = rotationZ,
+                    rotationX = rotationX,
+                    cameraDistance = 8f * density // add perspective depth
+                )
+            ) {
                 val canvasWidth = size.width
                 val canvasHeight = size.height
 
@@ -73,7 +145,7 @@ fun FloorPlanCanvas(points: List<Point3D>, modifier: Modifier = Modifier, walls:
                 val scaleZ = if (rangeZ > 0) (canvasHeight - padding * 2) / rangeZ else 1f
 
                 // Maintain aspect ratio
-                val scale = minOf(scaleX, scaleZ)
+                val baseScale = minOf(scaleX, scaleZ)
 
                 // 1. Draw 3D Walls
                 if (walls.isNotEmpty()) {
@@ -81,8 +153,8 @@ fun FloorPlanCanvas(points: List<Point3D>, modifier: Modifier = Modifier, walls:
                         val path = Path()
                         // Sort by X/Z roughly to form a 2D line segment representing the wall from top-down
                         wall.forEachIndexed { index, point ->
-                            val normalizedX = (point.x - minX) * scale + padding
-                            val normalizedZ = (point.z - minZ) * scale + padding
+                            val normalizedX = (point.x - minX) * baseScale + padding
+                            val normalizedZ = (point.z - minZ) * baseScale + padding
 
                             if (index == 0) {
                                 path.moveTo(normalizedX, normalizedZ)
@@ -99,8 +171,8 @@ fun FloorPlanCanvas(points: List<Point3D>, modifier: Modifier = Modifier, walls:
 
                 // 2. Draw Captured Features (Windows/Doors)
                 features.forEach { feature ->
-                    val normalizedX = (feature.pose.x - minX) * scale + padding
-                    val normalizedZ = (feature.pose.z - minZ) * scale + padding
+                    val normalizedX = (feature.pose.x - minX) * baseScale + padding
+                    val normalizedZ = (feature.pose.z - minZ) * baseScale + padding
 
                     // Draw a green square representing the feature
                     drawRect(
@@ -124,8 +196,8 @@ fun FloorPlanCanvas(points: List<Point3D>, modifier: Modifier = Modifier, walls:
                 if (filteredFloorPoints.isNotEmpty()) {
                     val path = Path()
                     filteredFloorPoints.forEachIndexed { index, point ->
-                        val normalizedX = (point.x - minX) * scale + padding
-                        val normalizedZ = (point.z - minZ) * scale + padding
+                        val normalizedX = (point.x - minX) * baseScale + padding
+                        val normalizedZ = (point.z - minZ) * baseScale + padding
 
                         if (index == 0) {
                             path.moveTo(normalizedX, normalizedZ)
@@ -156,10 +228,10 @@ fun FloorPlanCanvas(points: List<Point3D>, modifier: Modifier = Modifier, walls:
 
                             val text = String.format("%.1f ft", distFeet)
 
-                            val normX1 = (p1.x - minX) * scale + padding
-                            val normZ1 = (p1.z - minZ) * scale + padding
-                            val normX2 = (p2.x - minX) * scale + padding
-                            val normZ2 = (p2.z - minZ) * scale + padding
+                            val normX1 = (p1.x - minX) * baseScale + padding
+                            val normZ1 = (p1.z - minZ) * baseScale + padding
+                            val normX2 = (p2.x - minX) * baseScale + padding
+                            val normZ2 = (p2.z - minZ) * baseScale + padding
 
                             val midX = (normX1 + normX2) / 2
                             val midZ = (normZ1 + normZ2) / 2
