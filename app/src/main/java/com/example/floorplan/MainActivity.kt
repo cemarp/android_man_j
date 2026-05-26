@@ -15,6 +15,8 @@ import io.github.sceneview.ar.node.AnchorNode
 import com.google.ar.core.Config
 import com.google.ar.core.Plane
 import com.google.ar.core.TrackingState
+import com.google.ar.core.CameraConfig
+import com.google.ar.core.CameraConfigFilter
 import io.github.sceneview.node.Node
 import io.github.sceneview.collision.HitResult
 import android.Manifest
@@ -36,13 +38,17 @@ import androidx.compose.foundation.Image
 
 // Data models for the different scan types
 sealed class RoomScanData {
+    abstract val features: List<CapturedFeature>
+
     data class FloorPerimeter(
         val floorPoints: List<Point3D>,
-        var ceilingHeightMeters: Float? = null
+        var ceilingHeightMeters: Float? = null,
+        override val features: List<CapturedFeature> = emptyList()
     ) : RoomScanData()
 
     data class WallPolygons(
-        val walls: List<List<Point3D>>
+        val walls: List<List<Point3D>>,
+        override val features: List<CapturedFeature> = emptyList()
     ) : RoomScanData()
 }
 
@@ -107,7 +113,7 @@ fun MainScreen() {
             // Only draw the canvas if we have floor perimeter data
             val currentScan = roomScanData
             if (currentScan is RoomScanData.FloorPerimeter) {
-                FloorPlanCanvas(points = currentScan.floorPoints, modifier = Modifier.weight(1f))
+                FloorPlanCanvas(points = currentScan.floorPoints, features = currentScan.features, modifier = Modifier.weight(1f))
                 currentScan.ceilingHeightMeters?.let { h ->
                     Text(
                         text = "Estimated Ceiling Height: %.1f ft".format(h * 3.28084),
@@ -115,7 +121,7 @@ fun MainScreen() {
                     )
                 }
             } else if (currentScan is RoomScanData.WallPolygons) {
-                FloorPlanCanvas(points = emptyList(), walls = currentScan.walls, modifier = Modifier.weight(1f))
+                FloorPlanCanvas(points = emptyList(), walls = currentScan.walls, features = currentScan.features, modifier = Modifier.weight(1f))
                 Text(
                     text = "3D Wall Polygons Captured: ${currentScan.walls.size} walls.",
                     modifier = Modifier.padding(16.dp)
@@ -199,6 +205,19 @@ fun ARScannerScreen(onClose: () -> Unit, onFinishScan: (RoomScanData) -> Unit) {
                 // Re-enable HORIZONTAL_AND_VERTICAL since hitting the bottom corner often intersects the floor plane.
                 config.planeFindingMode = Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL
                 config.focusMode = Config.FocusMode.AUTO
+
+                // Configure ARCore to prefer the ultra-wide lens or lowest available focal length
+                try {
+                    val filter = CameraConfigFilter(session)
+                    val cameraConfigs = session.getSupportedCameraConfigs(filter)
+                    // Sorting by lowest focal length or just picking the first one (often the widest if sorted)
+                    val wideConfig = cameraConfigs.maxByOrNull { it.imageSize.width }
+                    if (wideConfig != null) {
+                        session.cameraConfig = wideConfig
+                    }
+                } catch (e: Exception) {
+                    Log.e("ARDebug", "Failed to configure wide camera: ${e.message}")
+                }
             },
             onViewCreated = {
                 // `this` is ARSceneView context
@@ -407,14 +426,14 @@ fun ARScannerScreen(onClose: () -> Unit, onFinishScan: (RoomScanData) -> Unit) {
             if (canFinish) {
                 Button(onClick = {
                     if (captured3DWalls.isNotEmpty()) {
-                        onFinishScan(RoomScanData.WallPolygons(captured3DWalls.toList()))
+                        onFinishScan(RoomScanData.WallPolygons(captured3DWalls.toList(), features = capturedFeatures.toList()))
                     } else {
                         // Floor perimeter mode logic
                         if (ceilingAnchor != null && capturedFloorPoints.isNotEmpty()) {
                             // Combine floor and ceiling taps
                             val avgFloorY = capturedFloorPoints.map { it.y }.average().toFloat()
                             val heightMeters = Math.abs((ceilingAnchor?.y ?: 0f) - avgFloorY)
-                            onFinishScan(RoomScanData.FloorPerimeter(capturedFloorPoints.toList(), ceilingHeightMeters = heightMeters))
+                            onFinishScan(RoomScanData.FloorPerimeter(capturedFloorPoints.toList(), ceilingHeightMeters = heightMeters, features = capturedFeatures.toList()))
                         } else {
                             // Ask for manual input
                             showManualHeightDialog = true
@@ -463,7 +482,7 @@ fun ARScannerScreen(onClose: () -> Unit, onFinishScan: (RoomScanData) -> Unit) {
                             Button(onClick = {
                                 val heightFeet = manualHeightInput.toFloatOrNull() ?: 8.0f
                                 val heightMeters = heightFeet / 3.28084f
-                                val finalData = RoomScanData.FloorPerimeter(capturedFloorPoints.toList(), ceilingHeightMeters = heightMeters)
+                                val finalData = RoomScanData.FloorPerimeter(capturedFloorPoints.toList(), ceilingHeightMeters = heightMeters, features = capturedFeatures.toList())
                                 onFinishScan(finalData)
                                 showManualHeightDialog = false
                             }) {

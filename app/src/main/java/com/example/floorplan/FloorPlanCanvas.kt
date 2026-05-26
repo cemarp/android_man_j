@@ -23,12 +23,13 @@ import kotlin.math.sqrt
 data class Point3D(val x: Float, val y: Float, val z: Float)
 
 @Composable
-fun FloorPlanCanvas(points: List<Point3D>, modifier: Modifier = Modifier, walls: List<List<Point3D>> = emptyList()) {
+fun FloorPlanCanvas(points: List<Point3D>, modifier: Modifier = Modifier, walls: List<List<Point3D>> = emptyList(), features: List<CapturedFeature> = emptyList()) {
     Box(modifier = modifier.background(Color(0xFFE0E0E0))) {
         // Collect all points to determine global canvas bounds
         val allPoints = mutableListOf<Point3D>()
         allPoints.addAll(points)
         walls.forEach { allPoints.addAll(it) }
+        features.forEach { allPoints.add(it.pose) }
 
         // Filter points: merge points that are essentially the same XZ floor coordinate
         val filteredFloorPoints = mutableListOf<Point3D>()
@@ -96,7 +97,30 @@ fun FloorPlanCanvas(points: List<Point3D>, modifier: Modifier = Modifier, walls:
                     }
                 }
 
-                // 2. Draw Floor Perimeter
+                // 2. Draw Captured Features (Windows/Doors)
+                features.forEach { feature ->
+                    val normalizedX = (feature.pose.x - minX) * scale + padding
+                    val normalizedZ = (feature.pose.z - minZ) * scale + padding
+
+                    // Draw a green square representing the feature
+                    drawRect(
+                        color = Color.Green,
+                        topLeft = Offset(normalizedX - 15f, normalizedZ - 15f),
+                        size = androidx.compose.ui.geometry.Size(30f, 30f)
+                    )
+
+                    val textLayoutResult = textMeasurer.measure(
+                        text = feature.label,
+                        style = TextStyle(fontSize = 12.sp, color = Color.White, background = Color.Black.copy(alpha = 0.5f))
+                    )
+
+                    drawText(
+                        textLayoutResult = textLayoutResult,
+                        topLeft = Offset(normalizedX - (textLayoutResult.size.width / 2), normalizedZ + 20f)
+                    )
+                }
+
+                // 3. Draw Floor Perimeter
                 if (filteredFloorPoints.isNotEmpty()) {
                     val path = Path()
                     filteredFloorPoints.forEachIndexed { index, point ->
