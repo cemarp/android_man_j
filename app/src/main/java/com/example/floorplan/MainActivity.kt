@@ -46,7 +46,7 @@ class MainActivity : ComponentActivity() {
 fun MainScreen() {
     var isARMode by remember { mutableStateOf(false) }
     var showFloorPlan by remember { mutableStateOf(false) }
-    val anchorPoints = remember { mutableStateListOf<Point2D>() }
+    val anchorPoints = remember { mutableStateListOf<Point3D>() }
     val cameraPermissionState = rememberPermissionState(Manifest.permission.CAMERA)
 
     if (isARMode) {
@@ -108,10 +108,10 @@ fun MainScreen() {
 }
 
 @Composable
-fun ARScannerScreen(onClose: () -> Unit, onFinishScan: () -> Unit, onAnchorPlaced: (Point2D) -> Unit) {
+fun ARScannerScreen(onClose: () -> Unit, onFinishScan: () -> Unit, onAnchorPlaced: (Point3D) -> Unit) {
     val childNodes = remember { mutableStateListOf<Node>() }
     var anchorsCount by remember { mutableStateOf(0) }
-    var currentHitPoint by remember { mutableStateOf<Point2D?>(null) }
+    var currentHitPoint by remember { mutableStateOf<Point3D?>(null) }
     var screenSize by remember { mutableStateOf(IntSize.Zero) }
 
     Box(
@@ -139,7 +139,7 @@ fun ARScannerScreen(onClose: () -> Unit, onFinishScan: () -> Unit, onAnchorPlace
                     for (hit in hitResults) {
                         val trackable = hit.trackable
                         if (trackable is Plane && trackable.isPoseInPolygon(hit.hitPose)) {
-                            currentHitPoint = Point2D(hit.hitPose.tx(), hit.hitPose.tz())
+                            currentHitPoint = Point3D(hit.hitPose.tx(), hit.hitPose.ty(), hit.hitPose.tz())
                             break
                         }
                     }
@@ -152,39 +152,39 @@ fun ARScannerScreen(onClose: () -> Unit, onFinishScan: () -> Unit, onAnchorPlace
 
         // Custom crosshair / Instructions overlay
         Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
+            modifier = Modifier.fillMaxSize()
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Surface(
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
-                    shape = MaterialTheme.shapes.medium,
-                    modifier = Modifier.padding(bottom = 64.dp)
+            Surface(
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 100.dp, start = 16.dp, end = 16.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            text = "How to scan walls:",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "1. Point camera at walls.\n2. Move slowly side-to-side.\n3. Aim the '+' at wall corners and tap 'Add Anchor'.",
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
+                    Text(
+                        text = "How to scan walls:",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "1. Point camera at walls.\n2. Aim the '+' exactly at the BOTTOM corners where the wall meets the floor.\n3. Tap 'Add Anchor' sequentially around the room.",
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
                 }
-
-                // Crosshair mapping to the exact center of the screen
-                Text(
-                    text = "+",
-                    style = MaterialTheme.typography.headlineLarge,
-                    color = if (currentHitPoint != null) Color.Green else Color.Red
-                )
             }
+
+            // Crosshair mapping to the exact center of the screen
+            Text(
+                text = "+",
+                style = MaterialTheme.typography.headlineLarge,
+                color = if (currentHitPoint != null) Color.Green else Color.Red,
+                modifier = Modifier.align(Alignment.Center)
+            )
         }
 
         Button(
