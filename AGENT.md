@@ -19,5 +19,6 @@ The app should support:
 
 ## Context / Decisions
 - Built from scratch targeting modern Android devices (Pixel 7 onwards).
+- Updated to target Android 15 (API 35) and added support for 16 KB memory page sizes to ensure compatibility with Pixel 7+ devices. This included upgrading ARCore to 1.54.0 and enabling `pageSizeCompat` in the manifest.
 - Emphasizing AR scanning first, followed by manual J logic.
 - Relying on local on-device capabilities for AR scanning and allowing user overrides for automatic feature tagging.

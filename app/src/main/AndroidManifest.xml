@@ -20,6 +20,10 @@
         <!-- ARCore meta-data -->
         <meta-data android:name="com.google.ar.core" android:value="required" tools:replace="android:value" />
 
+        <property
+            android:name="android.pageSizeCompat"
+            android:value="enabled" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
