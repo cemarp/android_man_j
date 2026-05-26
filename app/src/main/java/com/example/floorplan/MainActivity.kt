@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.Color
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
+import android.util.Log
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -114,6 +115,11 @@ fun ARScannerScreen(onClose: () -> Unit, onFinishScan: () -> Unit, onAnchorPlace
     var currentHitPoint by remember { mutableStateOf<Point3D?>(null) }
     var screenSize by remember { mutableStateOf(IntSize.Zero) }
 
+    // Debug instrumentation states
+    var debugTrackingState by remember { mutableStateOf("UNKNOWN") }
+    var debugHitStatus by remember { mutableStateOf("No Hit") }
+    var debugPlanesCount by remember { mutableStateOf(0) }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -124,25 +130,50 @@ fun ARScannerScreen(onClose: () -> Unit, onFinishScan: () -> Unit, onAnchorPlace
             childNodes = childNodes,
             planeRenderer = true,
             sessionConfiguration = { session, config ->
-                // EXPERIMENT: Restrict scanning purely to vertical walls
-                config.planeFindingMode = Config.PlaneFindingMode.VERTICAL
+                // Re-enable HORIZONTAL_AND_VERTICAL since hitting the bottom corner often intersects the floor plane.
+                config.planeFindingMode = Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL
                 config.focusMode = Config.FocusMode.AUTO
             },
             onSessionUpdated = { session, frame ->
                 val camera = frame.camera
+                debugTrackingState = camera.trackingState.name
+
+                val planes = session.getAllTrackables(Plane::class.java)
+                debugPlanesCount = planes.size
+
+                Log.d("ARDebug", "Camera Tracking: ${camera.trackingState.name}, Planes detected: ${planes.size}")
+
                 if (camera.trackingState == TrackingState.TRACKING && screenSize != IntSize.Zero) {
                     // Use center of screen coordinates in raw pixels for accurate hit testing
                     val centerX = screenSize.width / 2f
                     val centerY = screenSize.height / 2f
 
                     val hitResults = frame.hitTest(centerX, centerY)
+
+                    var foundHit = false
                     for (hit in hitResults) {
                         val trackable = hit.trackable
-                        if (trackable is Plane && trackable.isPoseInPolygon(hit.hitPose)) {
-                            currentHitPoint = Point3D(hit.hitPose.tx(), hit.hitPose.ty(), hit.hitPose.tz())
-                            break
+                        if (trackable is Plane) {
+                            if (trackable.isPoseInPolygon(hit.hitPose)) {
+                                currentHitPoint = Point3D(hit.hitPose.tx(), hit.hitPose.ty(), hit.hitPose.tz())
+                                debugHitStatus = "Hit: Plane (${trackable.type.name})"
+                                foundHit = true
+                                Log.d("ARDebug", "Hit Success on Plane Type: ${trackable.type.name} at ${currentHitPoint}")
+                                break
+                            } else {
+                                Log.d("ARDebug", "Hit discarded: Ray cast hit a plane bounding box but pose is outside polygon.")
+                            }
+                        } else {
+                            Log.d("ARDebug", "Hit discarded: Trackable is not a Plane (it is ${trackable.javaClass.simpleName})")
                         }
                     }
+                    if (!foundHit) {
+                        currentHitPoint = null
+                        debugHitStatus = if (hitResults.isEmpty()) "Hit: None" else "Hit: Outside Polygon/Not Plane"
+                    }
+                } else {
+                    currentHitPoint = null
+                    debugHitStatus = "Not Tracking"
                 }
             },
             onTrackingFailureChanged = { trackingFailureReason ->
@@ -185,6 +216,21 @@ fun ARScannerScreen(onClose: () -> Unit, onFinishScan: () -> Unit, onAnchorPlace
                 color = if (currentHitPoint != null) Color.Green else Color.Red,
                 modifier = Modifier.align(Alignment.Center)
             )
+
+            // Debug Overlay
+            Surface(
+                color = Color.Black.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(16.dp)
+            ) {
+                Column(modifier = Modifier.padding(8.dp)) {
+                    Text("DEBUG INFO", color = Color.Yellow, style = MaterialTheme.typography.labelSmall)
+                    Text("Tracking: $debugTrackingState", color = Color.White, style = MaterialTheme.typography.bodySmall)
+                    Text("Planes: $debugPlanesCount", color = Color.White, style = MaterialTheme.typography.bodySmall)
+                    Text("HitTest: $debugHitStatus", color = Color.White, style = MaterialTheme.typography.bodySmall)
+                }
+            }
         }
 
         Button(
