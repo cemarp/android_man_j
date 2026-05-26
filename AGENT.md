@@ -12,7 +12,7 @@ The app should support:
 
 ## Technical Approach
 - Native Android app using Kotlin and Jetpack Compose.
-- ARCore for on-device room scanning and tracking (horizontal and vertical planes).
+- ARCore for on-device room scanning and tracking (horizontal and vertical planes). *Experimental update: restricted strictly to vertical planes to improve wall-boundary targeting accuracy.*
 - Modular architecture to support both real-time scanning and Polycam import workflows.
 
 ## Known Issues / Next Steps

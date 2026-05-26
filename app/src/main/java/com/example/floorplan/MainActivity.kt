@@ -18,6 +18,9 @@ import com.google.ar.core.TrackingState
 import io.github.sceneview.node.Node
 import io.github.sceneview.collision.HitResult
 import android.Manifest
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.graphics.Color
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
@@ -109,24 +112,30 @@ fun ARScannerScreen(onClose: () -> Unit, onFinishScan: () -> Unit, onAnchorPlace
     val childNodes = remember { mutableStateListOf<Node>() }
     var anchorsCount by remember { mutableStateOf(0) }
     var currentHitPoint by remember { mutableStateOf<Point2D?>(null) }
+    var screenSize by remember { mutableStateOf(IntSize.Zero) }
 
-    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val screenWidth = maxWidth.value
-        val screenHeight = maxHeight.value
-
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .onSizeChanged { screenSize = it }
+    ) {
         ARScene(
             modifier = Modifier.fillMaxSize(),
             childNodes = childNodes,
             planeRenderer = true,
             sessionConfiguration = { session, config ->
-                config.planeFindingMode = Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL
+                // EXPERIMENT: Restrict scanning purely to vertical walls
+                config.planeFindingMode = Config.PlaneFindingMode.VERTICAL
                 config.focusMode = Config.FocusMode.AUTO
             },
             onSessionUpdated = { session, frame ->
                 val camera = frame.camera
-                if (camera.trackingState == TrackingState.TRACKING) {
-                    // Use center of screen coordinates for hit testing
-                    val hitResults = frame.hitTest(screenWidth / 2f, screenHeight / 2f)
+                if (camera.trackingState == TrackingState.TRACKING && screenSize != IntSize.Zero) {
+                    // Use center of screen coordinates in raw pixels for accurate hit testing
+                    val centerX = screenSize.width / 2f
+                    val centerY = screenSize.height / 2f
+
+                    val hitResults = frame.hitTest(centerX, centerY)
                     for (hit in hitResults) {
                         val trackable = hit.trackable
                         if (trackable is Plane && trackable.isPoseInPolygon(hit.hitPose)) {
@@ -147,12 +156,34 @@ fun ARScannerScreen(onClose: () -> Unit, onFinishScan: () -> Unit, onAnchorPlace
             contentAlignment = Alignment.Center
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = "Scan vertical walls and floors.\nAim at corners to place anchors.",
-                    color = MaterialTheme.colorScheme.onSurface,
+                Surface(
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+                    shape = MaterialTheme.shapes.medium,
                     modifier = Modifier.padding(bottom = 64.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "How to scan walls:",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "1. Point camera at walls.\n2. Move slowly side-to-side.\n3. Aim the '+' at wall corners and tap 'Add Anchor'.",
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+
+                // Crosshair mapping to the exact center of the screen
+                Text(
+                    text = "+",
+                    style = MaterialTheme.typography.headlineLarge,
+                    color = if (currentHitPoint != null) Color.Green else Color.Red
                 )
-                Text("+", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.primary)
             }
         }
 
