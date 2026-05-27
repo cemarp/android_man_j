@@ -43,8 +43,13 @@ If you need to debug AR functionality or crashes while the user is running the a
 
 When switching agents, you should read these outputs (if provided by the user) to understand exactly why a raycast failed (e.g. `Hit discarded: Trackable is not a Plane`) or why a tracking state degraded.
 
+## Critical Dependency Constraints
+- **Kotlin 2.2.10 + Coroutines 1.11.0**: The project uses Kotlin 2.2.10. It **REQUIRES** `kotlinx-coroutines` version **1.11.0** or higher. Using older versions will cause a `java.lang.NoClassDefFoundError: Lkotlin/coroutines/jvm/internal/SpillingKt` crash when interacting with the `FloorPlanCanvas` (specifically during pan/zoom gestures). **Do not downgrade these versions.**
+- **Android 15 (SDK 35)**: Ensure `compileSdk` and `targetSdk` remain at 35 to support 16 KB page size compatibility and latest platform features.
+
 ## Context / Decisions
 - Built from scratch targeting modern Android devices (Pixel 7 onwards).
 - Emphasizing AR scanning first, followed by manual J logic.
 - Relying on local on-device capabilities for AR scanning and allowing user overrides for automatic feature tagging.
+- Set ARCore Focus Mode to `FIXED` to prevent the camera from getting stuck in a blurred state during low-light sessions (specifically observed on Pixel 7 Pro).
 - Using `android:extractNativeLibs="true"` to bypass 16kb page size compatibility issues for legacy native libraries like Filament and ARCore.

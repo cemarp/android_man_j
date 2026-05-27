@@ -319,7 +319,10 @@ fun ARScannerScreen(onClose: () -> Unit, onFinishScan: (RoomScanData) -> Unit) {
             sessionConfiguration = { session, config ->
                 // Re-enable HORIZONTAL_AND_VERTICAL since hitting the bottom corner often intersects the floor plane.
                 config.planeFindingMode = Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL
-                config.focusMode = Config.FocusMode.AUTO
+                
+                // Switch to FIXED focus to prevent "focus hunting" in low light, 
+                // which often leads to a stuck blurred state on Pixel 7 Pro.
+                config.focusMode = Config.FocusMode.FIXED
 
                 // Configure ARCore to prefer the ultra-wide lens or lowest available focal length
                 try {
