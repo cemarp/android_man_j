@@ -1,0 +1,13 @@
+
+<<<<<<< SEARCH
+    // Feature capture state
+    var pendingFeatureImage by remember { mutableStateOf<Bitmap?>(null) }
+    var pendingFeaturePose by remember { mutableStateOf<Point3D?>(null) }
+    val capturedFeatures = remember { mutableStateListOf<CapturedFeature>() }
+=======
+    // Feature capture state
+    var pendingFeatureImage by remember { mutableStateOf<Bitmap?>(null) }
+    var pendingFeaturePose1 by remember { mutableStateOf<Point3D?>(null) }
+    var pendingFeaturePose2 by remember { mutableStateOf<Point3D?>(null) }
+    val capturedFeatures = remember { mutableStateListOf<CapturedFeature>() }
+>>>>>>> REPLACE

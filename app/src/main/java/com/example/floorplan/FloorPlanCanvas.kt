@@ -46,7 +46,10 @@ fun FloorPlanCanvas(points: List<Point3D>, modifier: Modifier = Modifier, walls:
         val allPoints = mutableListOf<Point3D>()
         allPoints.addAll(points)
         walls.forEach { allPoints.addAll(it) }
-        features.forEach { allPoints.add(it.pose) }
+        features.forEach {
+            allPoints.add(it.pose1)
+            allPoints.add(it.pose2)
+        }
 
         // Filter points: merge points that are essentially the same XZ floor coordinate
         val filteredFloorPoints = mutableListOf<Point3D>()
@@ -186,19 +189,19 @@ fun FloorPlanCanvas(points: List<Point3D>, modifier: Modifier = Modifier, walls:
                         // We need to fill the polygon instead of just tracing a stroke to make the walls translucent
                         // and visible against the floorplan.
                         wall.forEachIndexed { index, point ->
-                            val normalizedX = (point.x - minX) * baseScale + padding
-
                             // Project Y onto Z to create a fake 3D depth perception for vertical walls
                             val projectedZOffset = point.y * heightProjectionFactor
-                            val normalizedZ = ((point.z - minZ) * baseScale + padding) - projectedZOffset
+
+                            val nx = size.width / 2f + ((point.x - minX) * baseScale + padding - (maxX - minX) * baseScale / 2)
+                            val nz = size.height / 2f - ((point.z - minZ) * baseScale + padding - (maxZ - minZ) * baseScale / 2) - projectedZOffset
 
                             if (index == 0) {
-                                path.moveTo(normalizedX, normalizedZ)
+                                path.moveTo(nx, nz)
                             } else {
-                                path.lineTo(normalizedX, normalizedZ)
+                                path.lineTo(nx, nz)
                             }
 
-                            drawCircle(color = Color.Magenta, radius = 8f, center = Offset(normalizedX, normalizedZ))
+                            drawCircle(color = Color.Magenta, radius = 8f, center = Offset(nx, nz))
                         }
                         path.close()
 
@@ -209,20 +212,84 @@ fun FloorPlanCanvas(points: List<Point3D>, modifier: Modifier = Modifier, walls:
                     }
                 }
 
-                // 2. Draw Captured Features (Windows/Doors)
+                // Render Pseudo-3D Isometric Walls (approx 20 degrees tilted up)
+                val wallHeight = 120f // pixels representing ceiling height
+
+                // For standard floor perimeter, we draw walls upwards from the perimeter lines
+                if (filteredFloorPoints.size > 1) {
+                    for (i in 0 until filteredFloorPoints.size) {
+                        val p1 = filteredFloorPoints[i]
+                        val p2 = filteredFloorPoints[(i + 1) % filteredFloorPoints.size]
+
+                        val x1 = size.width / 2f + ((p1.x - minX) * baseScale + padding - (maxX - minX) * baseScale / 2)
+                        val z1 = size.height / 2f - ((p1.z - minZ) * baseScale + padding - (maxZ - minZ) * baseScale / 2)
+                        val x2 = size.width / 2f + ((p2.x - minX) * baseScale + padding - (maxX - minX) * baseScale / 2)
+                        val z2 = size.height / 2f - ((p2.z - minZ) * baseScale + padding - (maxZ - minZ) * baseScale / 2)
+
+                        // Base points
+                        val b1 = Offset(x1, z1)
+                        val b2 = Offset(x2, z2)
+
+                        // Top points (projected straight up to simulate a wall standing up in an isometric view)
+                        val t1 = Offset(x1, z1 - wallHeight)
+                        val t2 = Offset(x2, z2 - wallHeight)
+
+                        // Create path for the wall plane
+                        val wallPath = androidx.compose.ui.graphics.Path().apply {
+                            moveTo(b1.x, b1.y)
+                            lineTo(b2.x, b2.y)
+                            lineTo(t2.x, t2.y)
+                            lineTo(t1.x, t1.y)
+                            close()
+                        }
+
+                        // Fill the wall with a semi-transparent color
+                        drawPath(
+                            path = wallPath,
+                            color = Color(0xFFFF69B4).copy(alpha = 0.4f) // Hot pink semi-transparent
+                        )
+                        // Stroke the wall edges
+                        drawPath(
+                            path = wallPath,
+                            color = Color(0xFFFF1493), // Deep pink
+                            style = Stroke(width = 2f)
+                        )
+                    }
+                }
+
+                // 2. Draw Captured Features (Windows/Doors) projected onto the walls
                 features.forEach { feature ->
-                    // Apply the same 3D projection logic to features so they map correctly onto the tilted 3D walls
                     val heightProjectionFactor = 150f
-                    val projectedZOffset = feature.pose.y * heightProjectionFactor
+                    // If they tapped top and bottom corners, y will differ.
+                    // Let's project pose1 and pose2 straight up based on their y coordinate relative to the floor.
+                    val projectedZOffset1 = feature.pose1.y * heightProjectionFactor
+                    val projectedZOffset2 = feature.pose2.y * heightProjectionFactor
 
-                    val normalizedX = (feature.pose.x - minX) * baseScale + padding
-                    val normalizedZ = ((feature.pose.z - minZ) * baseScale + padding) - projectedZOffset
+                    val normalizedX1 = size.width / 2f + (((feature.pose1.x - minX) * baseScale + padding - (maxX - minX) * baseScale / 2))
+                    val normalizedZ1 = size.height / 2f - (((feature.pose1.z - minZ) * baseScale + padding - (maxZ - minZ) * baseScale / 2)) - projectedZOffset1
 
-                    // Draw a green square representing the feature
-                    drawRect(
+                    val normalizedX2 = size.width / 2f + (((feature.pose2.x - minX) * baseScale + padding - (maxX - minX) * baseScale / 2))
+                    val normalizedZ2 = size.height / 2f - (((feature.pose2.z - minZ) * baseScale + padding - (maxZ - minZ) * baseScale / 2)) - projectedZOffset2
+
+                    // Draw a green filled rectangle representing the window on the wall plane
+                    val windowPath = androidx.compose.ui.graphics.Path().apply {
+                        // Assuming pose1 is bottom-left and pose2 is top-right, or diagonal.
+                        // For a simple wall projection, we draw a box between the two coordinates
+                        moveTo(normalizedX1, normalizedZ1)
+                        lineTo(normalizedX2, normalizedZ1)
+                        lineTo(normalizedX2, normalizedZ2)
+                        lineTo(normalizedX1, normalizedZ2)
+                        close()
+                    }
+
+                    drawPath(
+                        path = windowPath,
+                        color = Color.Green.copy(alpha = 0.7f)
+                    )
+                    drawPath(
+                        path = windowPath,
                         color = Color.Green,
-                        topLeft = Offset(normalizedX - 15f, normalizedZ - 15f),
-                        size = androidx.compose.ui.geometry.Size(30f, 30f)
+                        style = Stroke(width = 3f)
                     )
 
                     val textLayoutResult = textMeasurer.measure(
@@ -232,7 +299,7 @@ fun FloorPlanCanvas(points: List<Point3D>, modifier: Modifier = Modifier, walls:
 
                     drawText(
                         textLayoutResult = textLayoutResult,
-                        topLeft = Offset(normalizedX - (textLayoutResult.size.width / 2), normalizedZ + 20f)
+                        topLeft = Offset(normalizedX1, normalizedZ2 - 20f)
                     )
                 }
 

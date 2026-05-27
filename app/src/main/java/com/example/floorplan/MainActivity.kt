@@ -12,6 +12,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import io.github.sceneview.ar.ARScene
 import io.github.sceneview.ar.node.AnchorNode
+import io.github.sceneview.node.SphereNode
+import dev.romainguy.kotlin.math.Float3
+import com.google.android.filament.Engine
+import com.google.android.filament.MaterialInstance
+import io.github.sceneview.ar.ARSceneView
 import com.google.ar.core.Config
 import com.google.ar.core.Plane
 import com.google.ar.core.TrackingState
@@ -65,7 +70,7 @@ sealed class RoomScanData {
     ) : RoomScanData()
 }
 
-data class CapturedFeature(val pose: Point3D, val image: Bitmap, val label: String)
+data class CapturedFeature(val pose1: Point3D, val pose2: Point3D, val image: Bitmap, val label: String)
 
 fun findSurfaceView(viewGroup: ViewGroup): SurfaceView? {
     for (i in 0 until viewGroup.childCount) {
@@ -291,7 +296,8 @@ fun ARScannerScreen(onClose: () -> Unit, onFinishScan: (RoomScanData) -> Unit) {
 
     // Feature capture state
     var pendingFeatureImage by remember { mutableStateOf<Bitmap?>(null) }
-    var pendingFeaturePose by remember { mutableStateOf<Point3D?>(null) }
+    var pendingFeaturePose1 by remember { mutableStateOf<Point3D?>(null) }
+    var pendingFeaturePose2 by remember { mutableStateOf<Point3D?>(null) }
     val capturedFeatures = remember { mutableStateListOf<CapturedFeature>() }
 
     // State for manual ceiling height input
@@ -311,6 +317,7 @@ fun ARScannerScreen(onClose: () -> Unit, onFinishScan: (RoomScanData) -> Unit) {
             .onSizeChanged { screenSize = it }
     ) {
         var arSurfaceView: SurfaceView? by remember { mutableStateOf(null) }
+        var engine: Engine? by remember { mutableStateOf(null) }
 
         ARScene(
             modifier = Modifier.fillMaxSize(),
@@ -319,6 +326,11 @@ fun ARScannerScreen(onClose: () -> Unit, onFinishScan: (RoomScanData) -> Unit) {
             sessionConfiguration = { session, config ->
                 // Re-enable HORIZONTAL_AND_VERTICAL since hitting the bottom corner often intersects the floor plane.
                 config.planeFindingMode = Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL
+
+                // Enable Depth mode to improve hit testing on featureless walls/ceilings
+                if (session.isDepthModeSupported(Config.DepthMode.AUTOMATIC)) {
+                    config.depthMode = Config.DepthMode.AUTOMATIC
+                }
 
                 // Switch to FIXED focus to prevent "focus hunting" in low light,
                 // which often leads to a stuck blurred state on Pixel 7 Pro.
@@ -346,6 +358,10 @@ fun ARScannerScreen(onClose: () -> Unit, onFinishScan: (RoomScanData) -> Unit) {
                 } else if (view is SurfaceView) {
                     arSurfaceView = view
                 }
+
+                // Get Filament Engine to create spheres later
+                val arSceneView = this as? ARSceneView
+                engine = arSceneView?.engine
             },
             onSessionUpdated = { session, frame ->
                 val camera = frame.camera
@@ -367,14 +383,16 @@ fun ARScannerScreen(onClose: () -> Unit, onFinishScan: (RoomScanData) -> Unit) {
                     for (hit in hitResults) {
                         val trackable = hit.trackable
                         if (trackable is Plane) {
-                            if (trackable.isPoseInPolygon(hit.hitPose)) {
+                            // Use isPoseInExtents instead of isPoseInPolygon to be more forgiving for walls and ceilings
+                            // where the fully detected polygon might be jagged or incomplete.
+                            if (trackable.isPoseInExtents(hit.hitPose)) {
                                 currentHitPoint = Point3D(hit.hitPose.tx(), hit.hitPose.ty(), hit.hitPose.tz())
                                 debugHitStatus = "Hit: Plane (${trackable.type.name})"
                                 foundHit = true
                                 Log.d("ARDebug", "Hit Success on Plane Type: ${trackable.type.name} at ${currentHitPoint}")
                                 break
                             } else {
-                                Log.d("ARDebug", "Hit discarded: Ray cast hit a plane bounding box but pose is outside polygon.")
+                                Log.d("ARDebug", "Hit discarded: Ray cast hit a plane bounding box but pose is outside extents.")
                             }
                         } else if (trackable is com.google.ar.core.Point || trackable is com.google.ar.core.DepthPoint) {
                             // Accept raw feature points or depth points. This is crucial for capturing windows/doors
@@ -496,25 +514,24 @@ fun ARScannerScreen(onClose: () -> Unit, onFinishScan: (RoomScanData) -> Unit) {
                     if (arSurfaceView != null) {
                         val surfaceView = arSurfaceView!!
 
-                        // First, try the active plane tracking point
                         var pointToSave = currentHitPoint
-
-                        // If no plane is actively tracked at the crosshair, we do a raw raycast against the feature point cloud.
-                        // This allows capturing corners or recessed windows that aren't perfectly flat planes.
                         if (pointToSave == null) {
-                            // If `currentHitPoint` is null (e.g. no active AR plane), Sceneview has a convenience `arSession` property
-                            // but accessing it requires casting to `ARSceneView` which we can't reliably do if `arSurfaceView` is just the `SurfaceView` child.
-                            // To ensure we get a point, we will just use the LAST known good point, or if there isn't one, the first floor anchor point
-                            // as a fallback for the feature.
-                            pointToSave = capturedFloorPoints.lastOrNull() ?: captured3DWalls.flatten().lastOrNull() ?: Point3D(0f, 0f, 0f)
-                            Log.w("ARDebug", "Used fallback point for feature capture.")
+                            // Don't fall back to the last floor anchor anymore!
+                            // Only capture if we actually hit a feature point or plane.
+                            Log.w("ARDebug", "No active hit point for feature corner.")
+                            return@Button
                         }
 
-                        if (pointToSave != null) {
+                        if (pendingFeaturePose1 == null) {
+                            // Captured the first corner
+                            pendingFeaturePose1 = pointToSave
+                            Log.d("ARDebug", "Captured feature corner 1")
+                        } else {
+                            // Captured the second corner, now take the picture
+                            pendingFeaturePose2 = pointToSave
                             val bitmap = Bitmap.createBitmap(surfaceView.width, surfaceView.height, Bitmap.Config.ARGB_8888)
                             PixelCopy.request(surfaceView, bitmap, { copyResult ->
                                 if (copyResult == PixelCopy.SUCCESS) {
-                                    pendingFeaturePose = pointToSave
                                     pendingFeatureImage = bitmap
                                 } else {
                                     Log.e("ARDebug", "Failed to capture pixel copy")
@@ -524,7 +541,11 @@ fun ARScannerScreen(onClose: () -> Unit, onFinishScan: (RoomScanData) -> Unit) {
                     }
                 }
             ) {
-                Text("📸 Capture Window/Door")
+                if (pendingFeaturePose1 == null) {
+                    Text("📸 Window/Door: Tap Corner 1")
+                } else {
+                    Text("📸 Window/Door: Tap Corner 2")
+                }
             }
 
             Button(
@@ -544,6 +565,21 @@ fun ARScannerScreen(onClose: () -> Unit, onFinishScan: (RoomScanData) -> Unit) {
                                     currentTracingWall.clear()
                                 }
                             }
+                        }
+
+                        // Add a 3D Sphere in AR to highlight the anchor
+                        if (engine != null) {
+                            // Convert point3d to float3
+                            val position = Float3(point.x, point.y, point.z)
+                            // Sceneview node
+                            val sphereNode = SphereNode(
+                                engine = engine!!,
+                                radius = 0.05f, // 5cm radius
+                                center = Float3(0f, 0f, 0f)
+                            ).apply {
+                                this.position = position
+                            }
+                            childNodes.add(sphereNode)
                         }
                     }
                 }
@@ -641,7 +677,7 @@ fun ARScannerScreen(onClose: () -> Unit, onFinishScan: (RoomScanData) -> Unit) {
             }
         }
 
-        if (pendingFeatureImage != null && pendingFeaturePose != null) {
+        if (pendingFeatureImage != null && pendingFeaturePose1 != null && pendingFeaturePose2 != null) {
             var labelText by remember { mutableStateOf("") }
             Box(modifier = Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
                 Surface(shape = MaterialTheme.shapes.medium, color = Color.White) {
@@ -661,15 +697,17 @@ fun ARScannerScreen(onClose: () -> Unit, onFinishScan: (RoomScanData) -> Unit) {
                         Row {
                             Button(onClick = {
                                 pendingFeatureImage = null
-                                pendingFeaturePose = null
+                                pendingFeaturePose1 = null
+                                pendingFeaturePose2 = null
                             }) {
                                 Text("Cancel")
                             }
                             Spacer(modifier = Modifier.width(16.dp))
                             Button(onClick = {
-                                capturedFeatures.add(CapturedFeature(pendingFeaturePose!!, pendingFeatureImage!!, labelText))
+                                capturedFeatures.add(CapturedFeature(pendingFeaturePose1!!, pendingFeaturePose2!!, pendingFeatureImage!!, labelText))
                                 pendingFeatureImage = null
-                                pendingFeaturePose = null
+                                pendingFeaturePose1 = null
+                                pendingFeaturePose2 = null
                             }) {
                                 Text("Save")
                             }

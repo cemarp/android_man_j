@@ -53,3 +53,11 @@ When switching agents, you should read these outputs (if provided by the user) t
 - Relying on local on-device capabilities for AR scanning and allowing user overrides for automatic feature tagging.
 - Set ARCore Focus Mode to `FIXED` to prevent the camera from getting stuck in a blurred state during low-light sessions (specifically observed on Pixel 7 Pro).
 - Using `android:extractNativeLibs="true"` to bypass 16kb page size compatibility issues for legacy native libraries like Filament and ARCore.
+
+
+## 2026-05-27: 3D Walls, 2-Tap Features, and AR Highlights
+- **Fixed Hit Testing**: Changed ARCore `hitTest` logic from `isPoseInPolygon` to `isPoseInExtents` and enabled `Config.DepthMode.AUTOMATIC`. This fixes the issue where walls and ceilings couldn't be tracked properly.
+- **AR Feedback Highlights**: Added Filament `SphereNode` to spawn small 3D spheres (radius 5cm) at every successfully tapped AR anchor, giving the user immediate visual confirmation in the AR viewfinder.
+- **2-Tap Bounding Box for Features**: Updated the window/door capture flow to require tapping two diagonal corners (`pose1` and `pose2`) to define the spatial extent of a feature, allowing realistic bounding box dimensions on walls.
+- **Isometric 2D Canvas**: Updated `FloorPlanCanvas.kt` to draw vertical walls pointing 'upwards' using the Y coordinates of trackables to simulate an isometric 3D perspective. 2-tap captured features are correctly projected onto these translucent wall planes.
+- **Branching Strategy**: Migrated changes from `feature/ar-floorplan-3d-walls` and ensured `main` branch holds the latest production-ready code.
