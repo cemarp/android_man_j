@@ -3,63 +3,19 @@ import re
 with open("app/src/main/java/com/example/floorplan/FloorPlanCanvas.kt", "r") as f:
     content = f.read()
 
-diff = """
-<<<<<<< SEARCH
-                    walls.forEach { wall ->
-                        val path = Path()
-                        // We need to fill the polygon instead of just tracing a stroke to make the walls translucent
-                        // and visible against the floorplan.
-                        wall.forEachIndexed { index, point ->
-                            val normalizedX = (point.x - minX) * baseScale + padding
+# Let's observe the mismatch in logic.
+# For walls, I used:
+# nx = size.width / 2f + ((point.x - minX) * baseScale + padding - (maxX - minX) * baseScale / 2)
+# nz = size.height / 2f - ((point.z - minZ) * baseScale + padding - (maxZ - minZ) * baseScale / 2) - projectedZOffset
 
-                            // Project Y onto Z to create a fake 3D depth perception for vertical walls
-                            val projectedZOffset = point.y * heightProjectionFactor
-                            val normalizedZ = ((point.z - minZ) * baseScale + padding) - projectedZOffset
+# For floor perimeter, the original code uses:
+# normalizedX = (point.x - minX) * baseScale + padding
+# normalizedZ = (point.z - minZ) * baseScale + padding
 
-                            if (index == 0) {
-                                path.moveTo(normalizedX, normalizedZ)
-                            } else {
-                                path.lineTo(normalizedX, normalizedZ)
-                            }
+# Notice how the floor perimeter code *does not use* `size.width / 2f` or `(maxX - minX) * baseScale / 2`
+# nor does it subtract the Z axis (which flipped the coordinate system!).
+# No wonder the walls and windows are out of alignment with the floor perimeter.
 
-                            drawCircle(color = Color.Magenta, radius = 8f, center = Offset(normalizedX, normalizedZ))
-                        }
-                        path.close()
-
-                        // Fill the wall shape with a semi-transparent pink color
-                        drawPath(path = path, color = Color(0xFFFF69B4).copy(alpha = 0.4f)) // Hot pink translucent
-
-                        // Draw the border stroke on top of the fill
-                        drawPath(path = path, color = Color.Magenta, style = Stroke(width = 4f))
-                    }
-=======
-                    walls.forEach { wall ->
-                        val path = Path()
-                        // We need to fill the polygon instead of just tracing a stroke to make the walls translucent
-                        // and visible against the floorplan.
-                        wall.forEachIndexed { index, point ->
-                            // Project Y onto Z to create a fake 3D depth perception for vertical walls
-                            val projectedZOffset = point.y * heightProjectionFactor
-
-                            val nx = size.width / 2f + ((point.x - minX) * baseScale + padding - (maxX - minX) * baseScale / 2)
-                            val nz = size.height / 2f - ((point.z - minZ) * baseScale + padding - (maxZ - minZ) * baseScale / 2) - projectedZOffset
-
-                            if (index == 0) {
-                                path.moveTo(nx, nz)
-                            } else {
-                                path.lineTo(nx, nz)
-                            }
-
-                            drawCircle(color = Color.Magenta, radius = 8f, center = Offset(nx, nz))
-                        }
-                        path.close()
-
-                        // Fill the wall shape with a semi-transparent pink color
-                        drawPath(path = path, color = Color(0xFFFF69B4).copy(alpha = 0.4f)) // Hot pink translucent
-
-                        // Draw the border stroke on top of the fill
-                        drawPath(path = path, color = Color.Magenta, style = Stroke(width = 4f))
-                    }
->>>>>>> REPLACE
-"""
-with open("patch_canvas4.patch", "w") as f: f.write(diff)
+# I will align the wall and window rendering logic exactly to the floor perimeter base logic:
+# base_x = (point.x - minX) * baseScale + padding
+# base_z = (point.z - minZ) * baseScale + padding

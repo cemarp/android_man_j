@@ -192,8 +192,8 @@ fun FloorPlanCanvas(points: List<Point3D>, modifier: Modifier = Modifier, walls:
                             // Project Y onto Z to create a fake 3D depth perception for vertical walls
                             val projectedZOffset = point.y * heightProjectionFactor
 
-                            val nx = size.width / 2f + ((point.x - minX) * baseScale + padding - (maxX - minX) * baseScale / 2)
-                            val nz = size.height / 2f - ((point.z - minZ) * baseScale + padding - (maxZ - minZ) * baseScale / 2) - projectedZOffset
+                            val nx = (point.x - minX) * baseScale + padding
+                            val nz = ((point.z - minZ) * baseScale + padding) - projectedZOffset
 
                             if (index == 0) {
                                 path.moveTo(nx, nz)
@@ -221,10 +221,10 @@ fun FloorPlanCanvas(points: List<Point3D>, modifier: Modifier = Modifier, walls:
                         val p1 = filteredFloorPoints[i]
                         val p2 = filteredFloorPoints[(i + 1) % filteredFloorPoints.size]
 
-                        val x1 = size.width / 2f + ((p1.x - minX) * baseScale + padding - (maxX - minX) * baseScale / 2)
-                        val z1 = size.height / 2f - ((p1.z - minZ) * baseScale + padding - (maxZ - minZ) * baseScale / 2)
-                        val x2 = size.width / 2f + ((p2.x - minX) * baseScale + padding - (maxX - minX) * baseScale / 2)
-                        val z2 = size.height / 2f - ((p2.z - minZ) * baseScale + padding - (maxZ - minZ) * baseScale / 2)
+                        val x1 = (p1.x - minX) * baseScale + padding
+                        val z1 = (p1.z - minZ) * baseScale + padding
+                        val x2 = (p2.x - minX) * baseScale + padding
+                        val z2 = (p2.z - minZ) * baseScale + padding
 
                         // Base points
                         val b1 = Offset(x1, z1)
@@ -265,11 +265,11 @@ fun FloorPlanCanvas(points: List<Point3D>, modifier: Modifier = Modifier, walls:
                     val projectedZOffset1 = feature.pose1.y * heightProjectionFactor
                     val projectedZOffset2 = feature.pose2.y * heightProjectionFactor
 
-                    val normalizedX1 = size.width / 2f + (((feature.pose1.x - minX) * baseScale + padding - (maxX - minX) * baseScale / 2))
-                    val normalizedZ1 = size.height / 2f - (((feature.pose1.z - minZ) * baseScale + padding - (maxZ - minZ) * baseScale / 2)) - projectedZOffset1
+                    val normalizedX1 = (feature.pose1.x - minX) * baseScale + padding
+                    val normalizedZ1 = ((feature.pose1.z - minZ) * baseScale + padding) - projectedZOffset1
 
-                    val normalizedX2 = size.width / 2f + (((feature.pose2.x - minX) * baseScale + padding - (maxX - minX) * baseScale / 2))
-                    val normalizedZ2 = size.height / 2f - (((feature.pose2.z - minZ) * baseScale + padding - (maxZ - minZ) * baseScale / 2)) - projectedZOffset2
+                    val normalizedX2 = (feature.pose2.x - minX) * baseScale + padding
+                    val normalizedZ2 = ((feature.pose2.z - minZ) * baseScale + padding) - projectedZOffset2
 
                     // Draw a green filled rectangle representing the window on the wall plane
                     val windowPath = androidx.compose.ui.graphics.Path().apply {
