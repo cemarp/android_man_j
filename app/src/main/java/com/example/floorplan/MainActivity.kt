@@ -36,6 +36,17 @@ import android.os.Looper
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.Image
 
+import com.google.maps.android.compose.GoogleMap
+import com.google.maps.android.compose.MapProperties
+import com.google.maps.android.compose.MapUiSettings
+import com.google.maps.android.compose.MapType
+import com.google.maps.android.compose.Marker
+import com.google.maps.android.compose.rememberMarkerState
+import com.google.android.gms.maps.model.LatLng
+import com.google.maps.android.compose.Polyline
+import com.google.maps.android.compose.rememberCameraPositionState
+import com.google.android.gms.maps.model.CameraPosition
+
 // Data models for the different scan types
 sealed class RoomScanData {
     abstract val features: List<CapturedFeature>
@@ -75,12 +86,21 @@ class MainActivity : ComponentActivity() {
 fun MainScreen() {
     var isARMode by remember { mutableStateOf(false) }
     var showFloorPlan by remember { mutableStateOf(false) }
+    var isOutdoorMode by remember { mutableStateOf(false) }
 
     // Store our consolidated scan data instead of just a raw list of points
     var roomScanData by remember { mutableStateOf<RoomScanData?>(null) }
     val cameraPermissionState = rememberPermissionState(Manifest.permission.CAMERA)
 
-    if (isARMode) {
+    if (isOutdoorMode) {
+        OutdoorModeScreen(
+            onClose = { isOutdoorMode = false },
+            onLaunchARFacadeCapture = {
+                isOutdoorMode = false
+                isARMode = true
+            }
+        )
+    } else if (isARMode) {
         if (cameraPermissionState.status.isGranted) {
             ARScannerScreen(
                 onClose = { isARMode = false },
@@ -135,7 +155,11 @@ fun MainScreen() {
             verticalArrangement = Arrangement.Center
         ) {
             Button(onClick = { isARMode = true }) {
-                Text("Start AR Room Scan")
+                Text("Start AR Room Scan (Indoor)")
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(onClick = { isOutdoorMode = true }) {
+                Text("Start Outdoor Mode (Maps + AR)")
             }
             Spacer(modifier = Modifier.height(16.dp))
             Button(onClick = { /* TODO: Polycam Integration */ }) {
@@ -157,6 +181,82 @@ enum class ScanMode(val title: String) {
     FLOOR_PERIMETER("Floor Perimeter (w/ Default Height)"),
     CEILING_TAP("Ceiling Tap (Height)"),
     TRACE_3D_WALLS("Trace 3D Walls")
+}
+
+@Composable
+fun OutdoorModeScreen(onClose: () -> Unit, onLaunchARFacadeCapture: () -> Unit) {
+    // Example starting coordinate, ideally you'd use FusedLocationProviderClient to get current location
+    val startLocation = LatLng(37.4221, -122.0841) // Googleplex
+    val cameraPositionState = rememberCameraPositionState {
+        position = CameraPosition.fromLatLngZoom(startLocation, 20f)
+    }
+
+    val polygonPoints = remember { mutableStateListOf<LatLng>() }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        GoogleMap(
+            modifier = Modifier.fillMaxSize(),
+            cameraPositionState = cameraPositionState,
+            properties = MapProperties(mapType = MapType.SATELLITE),
+            uiSettings = MapUiSettings(zoomControlsEnabled = false),
+            onMapClick = { latLng ->
+                polygonPoints.add(latLng)
+            }
+        ) {
+            // Draw markers for tapped corners
+            polygonPoints.forEach { point ->
+                Marker(
+                    state = rememberMarkerState(position = point),
+                    title = "Corner"
+                )
+            }
+
+            // Draw perimeter outline connecting the points
+            if (polygonPoints.isNotEmpty()) {
+                val polylinePoints = polygonPoints.toList() + polygonPoints.first() // Close loop
+                Polyline(
+                    points = polylinePoints,
+                    color = androidx.compose.ui.graphics.Color.Blue,
+                    width = 8f
+                )
+            }
+        }
+
+        Surface(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(16.dp),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+            shape = MaterialTheme.shapes.medium
+        ) {
+            Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Outdoor Mode", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "1. Find your house on the satellite map.\n2. Tap the corners of the roof to trace the footprint.\n3. Launch 'Facade Capture' to measure wall heights with AR.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(32.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Button(onClick = onClose) {
+                Text("Back")
+            }
+            Button(onClick = { polygonPoints.clear() }) {
+                Text("Clear Map")
+            }
+            Button(onClick = onLaunchARFacadeCapture) {
+                Text("Capture Facade Details (AR)")
+            }
+        }
+    }
 }
 
 @Composable
