@@ -47,5 +47,4 @@ When switching agents, you should read these outputs (if provided by the user) t
 - Built from scratch targeting modern Android devices (Pixel 7 onwards).
 - Emphasizing AR scanning first, followed by manual J logic.
 - Relying on local on-device capabilities for AR scanning and allowing user overrides for automatic feature tagging.
-- Using `android:pageSizeCompat="enabled"` in the manifest to bypass 16kb page size compatibility issues for legacy native libraries like Filament and ARCore on Android 15.
-- Resolved a `NoClassDefFoundError: SpillingKt` crash occurring during gesture interaction on the FloorPlanCanvas. This was due to a mismatch between Kotlin 2.2.10 and older Coroutines versions. Fixed by explicitly upgrading `kotlinx-coroutines` to 1.11.0 and aligning other dependencies with target SDK 35.
+- Using `android:extractNativeLibs="true"` to bypass 16kb page size compatibility issues for legacy native libraries like Filament and ARCore.

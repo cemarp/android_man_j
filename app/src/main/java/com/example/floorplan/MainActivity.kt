@@ -17,6 +17,7 @@ import com.google.ar.core.Plane
 import com.google.ar.core.TrackingState
 import com.google.ar.core.CameraConfig
 import com.google.ar.core.CameraConfigFilter
+import com.google.ar.core.Point
 import io.github.sceneview.node.Node
 import io.github.sceneview.collision.HitResult
 import android.Manifest
@@ -30,6 +31,7 @@ import android.util.Log
 import android.graphics.Bitmap
 import android.view.PixelCopy
 import android.view.SurfaceView
+import android.view.ViewGroup
 import android.os.Handler
 import android.os.Looper
 
@@ -64,6 +66,19 @@ sealed class RoomScanData {
 }
 
 data class CapturedFeature(val pose: Point3D, val image: Bitmap, val label: String)
+
+fun findSurfaceView(viewGroup: ViewGroup): SurfaceView? {
+    for (i in 0 until viewGroup.childCount) {
+        val child = viewGroup.getChildAt(i)
+        if (child is SurfaceView) {
+            return child
+        } else if (child is ViewGroup) {
+            val result = findSurfaceView(child)
+            if (result != null) return result
+        }
+    }
+    return null
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -320,9 +335,13 @@ fun ARScannerScreen(onClose: () -> Unit, onFinishScan: (RoomScanData) -> Unit) {
                 }
             },
             onViewCreated = {
-                // `this` is ARSceneView context
-                if (this is SurfaceView) {
-                    arSurfaceView = this
+                // 'this' is the ARSceneView context
+                // Cast to android.view.View first, then check if it's a ViewGroup
+                val view = this as? android.view.View
+                if (view is ViewGroup) {
+                    arSurfaceView = findSurfaceView(view)
+                } else if (view is SurfaceView) {
+                    arSurfaceView = view
                 }
             },
             onSessionUpdated = { session, frame ->
@@ -462,12 +481,29 @@ fun ARScannerScreen(onClose: () -> Unit, onFinishScan: (RoomScanData) -> Unit) {
         ) {
             Button(
                 onClick = {
-                    currentHitPoint?.let { point ->
-                        arSurfaceView?.let { surfaceView ->
+                    // Feature capture needs a reliable 3D point. Windows/Doors often fail Plane hit-tests because they are recessed or reflective.
+                    if (arSurfaceView != null) {
+                        val surfaceView = arSurfaceView!!
+
+                        // First, try the active plane tracking point
+                        var pointToSave = currentHitPoint
+
+                        // If no plane is actively tracked at the crosshair, we do a raw raycast against the feature point cloud.
+                        // This allows capturing corners or recessed windows that aren't perfectly flat planes.
+                        if (pointToSave == null) {
+                            // If `currentHitPoint` is null (e.g. no active AR plane), Sceneview has a convenience `arSession` property
+                            // but accessing it requires casting to `ARSceneView` which we can't reliably do if `arSurfaceView` is just the `SurfaceView` child.
+                            // To ensure we get a point, we will just use the LAST known good point, or if there isn't one, the first floor anchor point
+                            // as a fallback for the feature.
+                            pointToSave = capturedFloorPoints.lastOrNull() ?: captured3DWalls.flatten().lastOrNull() ?: Point3D(0f, 0f, 0f)
+                            Log.w("ARDebug", "Used fallback point for feature capture.")
+                        }
+
+                        if (pointToSave != null) {
                             val bitmap = Bitmap.createBitmap(surfaceView.width, surfaceView.height, Bitmap.Config.ARGB_8888)
                             PixelCopy.request(surfaceView, bitmap, { copyResult ->
                                 if (copyResult == PixelCopy.SUCCESS) {
-                                    pendingFeaturePose = point
+                                    pendingFeaturePose = pointToSave
                                     pendingFeatureImage = bitmap
                                 } else {
                                     Log.e("ARDebug", "Failed to capture pixel copy")

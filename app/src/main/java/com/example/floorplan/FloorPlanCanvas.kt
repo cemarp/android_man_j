@@ -24,6 +24,11 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.calculateRotation
 
 // Represents a 3D coordinate for an AR anchor in world space
 data class Point3D(val x: Float, val y: Float, val z: Float)
@@ -105,31 +110,38 @@ fun FloorPlanCanvas(points: List<Point3D>, modifier: Modifier = Modifier, walls:
             Canvas(modifier = Modifier
                 .fillMaxSize()
                 .pointerInput(Unit) {
-                    // Unified transform gesture handling.
-                    // A pan with zoom=1f and rot=0f is typical for a 1-finger drag.
-                    // Multi-finger triggers zoom/rotation changes.
-                    detectTransformGestures(panZoomLock = false) { _, pan, zoom, rotation ->
-                        scale *= zoom
-                        rotationZ += rotation
+                    awaitEachGesture {
+                        awaitFirstDown()
+                        do {
+                            val event = awaitPointerEvent()
+                            val pointers = event.changes
 
-                        // To allow map-style navigation:
-                        // If it's purely a 1-finger pan (no zoom/rotation), apply translation.
-                        // If it's a 2-finger gesture with primarily vertical motion and little zoom/rotation, treat as tilt.
-                        // Otherwise, apply standard translation alongside zoom/rotation.
-                        val isMultiFinger = zoom !in 0.99f..1.01f || Math.abs(rotation) > 0.5f
+                            if (pointers.isNotEmpty()) {
+                                val zoomChange = event.calculateZoom()
+                                val rotationChange = event.calculateRotation()
+                                val panChange = event.calculatePan()
 
-                        if (isMultiFinger) {
-                            // If zooming/rotating, check if it's actually a tilt gesture (2 fingers dragging vertically)
-                            // This is a rough heuristic. A better approach is tracking pointer counts manually, but this suffices for the MVP.
-                            if (zoom in 0.9f..1.1f && Math.abs(rotation) < 5f && Math.abs(pan.y) > Math.abs(pan.x) * 1.5f) {
-                                rotationX -= pan.y * 0.5f
-                            } else {
-                                offset += pan
+                                scale *= zoomChange
+                                rotationZ += rotationChange
+
+                                // If exactly 2 fingers are down, we apply the pan to tilt (X rotation)
+                                // If 1 finger is down, we apply pan to translation offset
+                                if (pointers.size >= 2) {
+                                    // Per user request, horizontal (or vertical) 2-finger panning without pinch/rotation triggers tilt
+                                    if (zoomChange in 0.95f..1.05f && Math.abs(rotationChange) < 5f) {
+                                        // Use whichever axis is moved more to dictate the tilt amount
+                                        val tiltMagnitude = if (Math.abs(panChange.x) > Math.abs(panChange.y)) panChange.x else -panChange.y
+                                        rotationX += tiltMagnitude * 0.5f
+                                    } else {
+                                        offset += panChange
+                                    }
+                                } else {
+                                    offset += panChange
+                                }
+
+                                pointers.forEach { it.consume() }
                             }
-                        } else {
-                            // Single finger drag strictly pans
-                            offset += pan
-                        }
+                        } while (event.changes.any { it.pressed })
                     }
                 }
                 .graphicsLayer(
