@@ -319,8 +319,8 @@ fun ARScannerScreen(onClose: () -> Unit, onFinishScan: (RoomScanData) -> Unit) {
             sessionConfiguration = { session, config ->
                 // Re-enable HORIZONTAL_AND_VERTICAL since hitting the bottom corner often intersects the floor plane.
                 config.planeFindingMode = Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL
-                
-                // Switch to FIXED focus to prevent "focus hunting" in low light, 
+
+                // Switch to FIXED focus to prevent "focus hunting" in low light,
                 // which often leads to a stuck blurred state on Pixel 7 Pro.
                 config.focusMode = Config.FocusMode.FIXED
 
@@ -376,13 +376,21 @@ fun ARScannerScreen(onClose: () -> Unit, onFinishScan: (RoomScanData) -> Unit) {
                             } else {
                                 Log.d("ARDebug", "Hit discarded: Ray cast hit a plane bounding box but pose is outside polygon.")
                             }
+                        } else if (trackable is com.google.ar.core.Point || trackable is com.google.ar.core.DepthPoint) {
+                            // Accept raw feature points or depth points. This is crucial for capturing windows/doors
+                            // because glass and recesses often fail strict Plane detection.
+                            currentHitPoint = Point3D(hit.hitPose.tx(), hit.hitPose.ty(), hit.hitPose.tz())
+                            debugHitStatus = "Hit: Raw Point (${trackable.javaClass.simpleName})"
+                            foundHit = true
+                            Log.d("ARDebug", "Hit Success on Raw Point Type: ${trackable.javaClass.simpleName} at ${currentHitPoint}")
+                            break
                         } else {
-                            Log.d("ARDebug", "Hit discarded: Trackable is not a Plane (it is ${trackable.javaClass.simpleName})")
+                            Log.d("ARDebug", "Hit discarded: Trackable is not a Plane or Point (it is ${trackable.javaClass.simpleName})")
                         }
                     }
                     if (!foundHit) {
                         currentHitPoint = null
-                        debugHitStatus = if (hitResults.isEmpty()) "Hit: None" else "Hit: Outside Polygon/Not Plane"
+                        debugHitStatus = if (hitResults.isEmpty()) "Hit: None" else "Hit: Outside Polygon/Not Point"
                     }
                 } else {
                     currentHitPoint = null

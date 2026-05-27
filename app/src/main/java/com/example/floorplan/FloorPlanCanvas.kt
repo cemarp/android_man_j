@@ -211,8 +211,12 @@ fun FloorPlanCanvas(points: List<Point3D>, modifier: Modifier = Modifier, walls:
 
                 // 2. Draw Captured Features (Windows/Doors)
                 features.forEach { feature ->
+                    // Apply the same 3D projection logic to features so they map correctly onto the tilted 3D walls
+                    val heightProjectionFactor = 150f
+                    val projectedZOffset = feature.pose.y * heightProjectionFactor
+
                     val normalizedX = (feature.pose.x - minX) * baseScale + padding
-                    val normalizedZ = (feature.pose.z - minZ) * baseScale + padding
+                    val normalizedZ = ((feature.pose.z - minZ) * baseScale + padding) - projectedZOffset
 
                     // Draw a green square representing the feature
                     drawRect(
