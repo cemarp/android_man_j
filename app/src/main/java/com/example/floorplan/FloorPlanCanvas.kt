@@ -105,16 +105,31 @@ fun FloorPlanCanvas(points: List<Point3D>, modifier: Modifier = Modifier, walls:
             Canvas(modifier = Modifier
                 .fillMaxSize()
                 .pointerInput(Unit) {
-                    detectTransformGestures { centroid, pan, zoom, rotation ->
+                    // Unified transform gesture handling.
+                    // A pan with zoom=1f and rot=0f is typical for a 1-finger drag.
+                    // Multi-finger triggers zoom/rotation changes.
+                    detectTransformGestures(panZoomLock = false) { _, pan, zoom, rotation ->
                         scale *= zoom
-                        // To trigger tilt, we look for 2-finger vertical drag (little zoom, little rotation, but high vertical pan relative to horizontal)
-                        if (zoom in 0.99f..1.01f && Math.abs(rotation) < 0.5f && Math.abs(pan.y) > Math.abs(pan.x) * 2f) {
-                            rotationX -= pan.y * 0.5f // Negative to tilt correctly
+                        rotationZ += rotation
+
+                        // To allow map-style navigation:
+                        // If it's purely a 1-finger pan (no zoom/rotation), apply translation.
+                        // If it's a 2-finger gesture with primarily vertical motion and little zoom/rotation, treat as tilt.
+                        // Otherwise, apply standard translation alongside zoom/rotation.
+                        val isMultiFinger = zoom !in 0.99f..1.01f || Math.abs(rotation) > 0.5f
+
+                        if (isMultiFinger) {
+                            // If zooming/rotating, check if it's actually a tilt gesture (2 fingers dragging vertically)
+                            // This is a rough heuristic. A better approach is tracking pointer counts manually, but this suffices for the MVP.
+                            if (zoom in 0.9f..1.1f && Math.abs(rotation) < 5f && Math.abs(pan.y) > Math.abs(pan.x) * 1.5f) {
+                                rotationX -= pan.y * 0.5f
+                            } else {
+                                offset += pan
+                            }
                         } else {
-                            // Apply translation
+                            // Single finger drag strictly pans
                             offset += pan
                         }
-                        rotationZ += rotation
                     }
                 }
                 .graphicsLayer(
@@ -149,12 +164,21 @@ fun FloorPlanCanvas(points: List<Point3D>, modifier: Modifier = Modifier, walls:
 
                 // 1. Draw 3D Walls
                 if (walls.isNotEmpty()) {
+                    // Simple tilt heuristic mapping to give pseudo-3D height to the walls.
+                    // Negative Y in ARCore goes "down" (closer to floor), positive goes "up" (ceiling).
+                    // We offset the Z-axis drawing coordinate based on the Y height to create a 3D isometric effect.
+                    val heightProjectionFactor = 150f
+
                     walls.forEach { wall ->
                         val path = Path()
-                        // Sort by X/Z roughly to form a 2D line segment representing the wall from top-down
+                        // We need to fill the polygon instead of just tracing a stroke to make the walls translucent
+                        // and visible against the floorplan.
                         wall.forEachIndexed { index, point ->
                             val normalizedX = (point.x - minX) * baseScale + padding
-                            val normalizedZ = (point.z - minZ) * baseScale + padding
+
+                            // Project Y onto Z to create a fake 3D depth perception for vertical walls
+                            val projectedZOffset = point.y * heightProjectionFactor
+                            val normalizedZ = ((point.z - minZ) * baseScale + padding) - projectedZOffset
 
                             if (index == 0) {
                                 path.moveTo(normalizedX, normalizedZ)
@@ -165,7 +189,11 @@ fun FloorPlanCanvas(points: List<Point3D>, modifier: Modifier = Modifier, walls:
                             drawCircle(color = Color.Magenta, radius = 8f, center = Offset(normalizedX, normalizedZ))
                         }
                         path.close()
-                        drawPath(path = path, color = Color.Magenta.copy(alpha = 0.5f), style = Stroke(width = 12f))
+
+                        // Fill the wall polygon to make it translucent, rather than just drawing the stroke edge
+                        drawPath(path = path, color = Color.Magenta.copy(alpha = 0.2f))
+                        // Draw the border stroke on top of the fill
+                        drawPath(path = path, color = Color.Magenta, style = Stroke(width = 4f))
                     }
                 }
 
