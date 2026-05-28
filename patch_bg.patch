@@ -1,0 +1,7 @@
+
+<<<<<<< SEARCH
+import androidx.compose.ui.Modifier
+=======
+import androidx.compose.ui.Modifier
+import androidx.compose.foundation.background
+>>>>>>> REPLACE

@@ -257,28 +257,76 @@ fun FloorPlanCanvas(points: List<Point3D>, modifier: Modifier = Modifier, walls:
                     }
                 }
 
-                // 2. Draw Captured Features (Windows/Doors) projected onto the walls
+                // Helper function to project a point onto a line segment
+                fun projectPointOntoSegment(px: Float, pz: Float, ax: Float, az: Float, bx: Float, bz: Float): Pair<Float, Float> {
+                    val abx = bx - ax
+                    val abz = bz - az
+                    val apx = px - ax
+                    val apz = pz - az
+                    val lengthSq = abx * abx + abz * abz
+                    if (lengthSq == 0f) return Pair(ax, az)
+                    val t = (apx * abx + apz * abz) / lengthSq
+                    val clampedT = t.coerceIn(0f, 1f)
+                    return Pair(ax + clampedT * abx, az + clampedT * abz)
+                }
+
+                // 2. Draw Captured Features (Windows/Doors) projected onto the nearest wall
                 features.forEach { feature ->
                     val heightProjectionFactor = 150f
-                    // If they tapped top and bottom corners, y will differ.
-                    // Let's project pose1 and pose2 straight up based on their y coordinate relative to the floor.
                     val projectedZOffset1 = feature.pose1.y * heightProjectionFactor
                     val projectedZOffset2 = feature.pose2.y * heightProjectionFactor
 
-                    val normalizedX1 = (feature.pose1.x - minX) * baseScale + padding
-                    val normalizedZ1 = ((feature.pose1.z - minZ) * baseScale + padding) - projectedZOffset1
+                    val rawX1 = (feature.pose1.x - minX) * baseScale + padding
+                    val rawZ1 = (feature.pose1.z - minZ) * baseScale + padding
+                    val rawX2 = (feature.pose2.x - minX) * baseScale + padding
+                    val rawZ2 = (feature.pose2.z - minZ) * baseScale + padding
 
-                    val normalizedX2 = (feature.pose2.x - minX) * baseScale + padding
-                    val normalizedZ2 = ((feature.pose2.z - minZ) * baseScale + padding) - projectedZOffset2
+                    // Find the nearest wall line segment to snap the window perfectly to the drawn wall plane.
+                    var closestDist = Float.MAX_VALUE
+                    var projX1 = rawX1
+                    var projZ1 = rawZ1
+                    var projX2 = rawX2
+                    var projZ2 = rawZ2
 
-                    // Draw a green filled rectangle representing the window on the wall plane
+                    if (filteredFloorPoints.size > 1) {
+                        for (i in 0 until filteredFloorPoints.size) {
+                            val p1 = filteredFloorPoints[i]
+                            val p2 = filteredFloorPoints[(i + 1) % filteredFloorPoints.size]
+
+                            val ax = (p1.x - minX) * baseScale + padding
+                            val az = (p1.z - minZ) * baseScale + padding
+                            val bx = (p2.x - minX) * baseScale + padding
+                            val bz = (p2.z - minZ) * baseScale + padding
+
+                            // Project the center of the window to find the closest wall
+                            val centerX = (rawX1 + rawX2) / 2f
+                            val centerZ = (rawZ1 + rawZ2) / 2f
+                            val (cProjX, cProjZ) = projectPointOntoSegment(centerX, centerZ, ax, az, bx, bz)
+
+                            val dist = Math.hypot((centerX - cProjX).toDouble(), (centerZ - cProjZ).toDouble()).toFloat()
+                            if (dist < closestDist) {
+                                closestDist = dist
+                                val (pX1, pZ1) = projectPointOntoSegment(rawX1, rawZ1, ax, az, bx, bz)
+                                val (pX2, pZ2) = projectPointOntoSegment(rawX2, rawZ2, ax, az, bx, bz)
+                                projX1 = pX1
+                                projZ1 = pZ1
+                                projX2 = pX2
+                                projZ2 = pZ2
+                            }
+                        }
+                    }
+
+                    // Since pose1 and pose2 define the diagonal bounds, we can construct the 4 corners.
+                    // Assume pose1 has lower Y (closer to floor) and pose2 has higher Y (closer to ceiling).
+                    val bottomYOffset = minOf(projectedZOffset1, projectedZOffset2)
+                    val topYOffset = maxOf(projectedZOffset1, projectedZOffset2)
+
+                    // Draw a green filled polygon representing the window bounding box, coplanar on the wall
                     val windowPath = androidx.compose.ui.graphics.Path().apply {
-                        // Assuming pose1 is bottom-left and pose2 is top-right, or diagonal.
-                        // For a simple wall projection, we draw a box between the two coordinates
-                        moveTo(normalizedX1, normalizedZ1)
-                        lineTo(normalizedX2, normalizedZ1)
-                        lineTo(normalizedX2, normalizedZ2)
-                        lineTo(normalizedX1, normalizedZ2)
+                        moveTo(projX1, projZ1 - bottomYOffset) // Bottom corner 1
+                        lineTo(projX2, projZ2 - bottomYOffset) // Bottom corner 2
+                        lineTo(projX2, projZ2 - topYOffset) // Top corner 2
+                        lineTo(projX1, projZ1 - topYOffset) // Top corner 1
                         close()
                     }
 
@@ -299,7 +347,7 @@ fun FloorPlanCanvas(points: List<Point3D>, modifier: Modifier = Modifier, walls:
 
                     drawText(
                         textLayoutResult = textLayoutResult,
-                        topLeft = Offset(normalizedX1, normalizedZ2 - 20f)
+                        topLeft = Offset(projX1, projZ1 - topYOffset - 20f)
                     )
                 }
 

@@ -1,8 +1,4 @@
-import re
-with open("app/src/main/java/com/example/floorplan/FloorPlanCanvas.kt", "r") as f:
-    content = f.read()
 
-diff = """
 <<<<<<< SEARCH
                     drawText(
                         textLayoutResult = textLayoutResult,
@@ -14,5 +10,3 @@ diff = """
                         topLeft = Offset(projX1, normalizedZ2 - 20f)
                     )
 >>>>>>> REPLACE
-"""
-with open("patch_proj2.patch", "w") as f: f.write(diff)
