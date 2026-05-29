@@ -61,3 +61,6 @@ When switching agents, you should read these outputs (if provided by the user) t
 - **2-Tap Bounding Box for Features**: Updated the window/door capture flow to require tapping two diagonal corners (`pose1` and `pose2`) to define the spatial extent of a feature, allowing realistic bounding box dimensions on walls.
 - **Isometric 2D Canvas**: Updated `FloorPlanCanvas.kt` to draw vertical walls pointing 'upwards' using the Y coordinates of trackables to simulate an isometric 3D perspective. 2-tap captured features are correctly projected onto these translucent wall planes.
 - **Branching Strategy**: Migrated changes from `feature/ar-floorplan-3d-walls` and ensured `main` branch holds the latest production-ready code.
+
+## 3D Sceneview Migration
+Migrated the `FloorPlanCanvas` to a full `FloorPlan3DScene` using Filament (`io.github.sceneview`). The UI now renders actual 3D nodes (`CubeNode`) for walls and features. Replaced the 2D pseudo-3D isometric projection with a true 3D orbital viewer. Used `rememberEngine()` to persist the 3D context safely inside the composable and configured Euler rotations for `CubeNode` alignments via `Quaternion.fromEuler`.

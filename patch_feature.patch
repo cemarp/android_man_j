@@ -1,6 +1,0 @@
-
-<<<<<<< SEARCH
-data class CapturedFeature(val pose: Point3D, val image: Bitmap, val label: String)
-=======
-data class CapturedFeature(val pose1: Point3D, val pose2: Point3D, val image: Bitmap, val label: String)
->>>>>>> REPLACE

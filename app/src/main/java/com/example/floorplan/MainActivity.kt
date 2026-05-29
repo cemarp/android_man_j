@@ -151,22 +151,25 @@ fun MainScreen() {
                 Text("Back to Menu")
             }
 
-            // Only draw the canvas if we have floor perimeter data
             val currentScan = roomScanData
-            if (currentScan is RoomScanData.FloorPerimeter) {
-                FloorPlanCanvas(points = currentScan.floorPoints, features = currentScan.features, modifier = Modifier.weight(1f))
-                currentScan.ceilingHeightMeters?.let { h ->
+            if (currentScan != null) {
+                Box(modifier = Modifier.weight(1f)) {
+                    FloorPlan3DScene(scanData = currentScan, onClose = { showFloorPlan = false })
+                }
+
+                if (currentScan is RoomScanData.FloorPerimeter) {
+                    currentScan.ceilingHeightMeters?.let { h ->
+                        Text(
+                            text = "Estimated Ceiling Height: %.1f ft".format(h * 3.28084),
+                            modifier = Modifier.padding(16.dp)
+                        )
+                    }
+                } else if (currentScan is RoomScanData.WallPolygons) {
                     Text(
-                        text = "Estimated Ceiling Height: %.1f ft".format(h * 3.28084),
+                        text = "3D Wall Polygons Captured: ${currentScan.walls.size} walls.",
                         modifier = Modifier.padding(16.dp)
                     )
                 }
-            } else if (currentScan is RoomScanData.WallPolygons) {
-                FloorPlanCanvas(points = emptyList(), walls = currentScan.walls, features = currentScan.features, modifier = Modifier.weight(1f))
-                Text(
-                    text = "3D Wall Polygons Captured: ${currentScan.walls.size} walls.",
-                    modifier = Modifier.padding(16.dp)
-                )
             }
         }
     } else {
